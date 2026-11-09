@@ -1,5 +1,7 @@
 # ida-rosetta
 
+[![ci](https://github.com/zeetabit/ida-rosetta/actions/workflows/ci.yml/badge.svg)](https://github.com/zeetabit/ida-rosetta/actions/workflows/ci.yml)
+
 **Debug x86_64 (Rosetta) processes with IDA Pro on Apple Silicon.**
 
 IDA 9.x (arm64) cannot debug a translated x86_64 process: its macOS debugger is
@@ -58,7 +60,7 @@ IDA (arm64)                                   translated x86_64 process
 ## Install
 
 ```bash
-git clone https://github.com/<you>/ida-rosetta.git
+git clone https://github.com/zeetabit/ida-rosetta.git
 ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
 ```
 
