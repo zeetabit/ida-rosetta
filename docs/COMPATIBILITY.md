@@ -37,6 +37,16 @@ ida_kernwin.rosetta_rebuild()     # 2. rebuild the launcher against current tool
 * `launcher state: vX, src ...` must show the current plugin version.
 * `stub: /usr/libexec/rosetta/debugserver` (or the `oah` symlink).
 * `target image base == ida image base` — otherwise the target has ASLR.
+* `ui.intercept_f9` matches what you expect (default `false`), and
+  `ui.f9_action` is the behaviour you want F9 to replay (`start` / `attach`).
+
+## If the Rosetta menu is missing
+
+The menu is created with `create_menu("Rosetta", "Rosetta", "Debugger/Start process")`
+(anchored before *Start process*, top-level fallback). If an IDA build refuses
+the anchor, the menu may appear at the top level instead of under *Debugger*;
+actions are still attached to `"Rosetta/"`. Creating the menu **before**
+attaching actions is required — a nested path alone does not create it.
 
 ## If the hook stops firing
 

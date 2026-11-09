@@ -24,6 +24,9 @@
 #     "attach by process..."  filterable process list (pid/name/command)
 #     "attach to running target", "doctor / prerequisites", "rebuild launcher"
 #
+#   F9 (with interception on) replays the last of those choices: it attaches,
+#   or starts the program and attaches, depending on what you used last.
+#
 #   Start the program yourself instead with:
 #          ~/.idapro/plugins/ida-rosetta/noaslr [args] /path/to/program
 #   then press F9 (or Debugger > "Attach to process...").
@@ -38,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 import hashlib
 import json
@@ -66,9 +69,12 @@ STUB_CANDIDATES = (
 )
 PORT = 1239
 
-# "never"  -> you start the program yourself with the bundled launcher
-# "always" -> F9 starts it (or restarts it under the launcher) automatically
-LAUNCH_MODE = "never"
+# F9 (while interception is enabled) replays the last explicit action:
+#   "attach" -> attach to the already running target
+#   "start"  -> start it with the launcher, then attach
+# It is stored as ui.f9_action in settings.json and updated by the menu
+# actions "Pick and start..." / "Attach to running target" / "Attach by
+# process...".
 
 # Source of the launcher. Compiled on first use into
 #   <user idadir>/plugins/ida-rosetta/noaslr
@@ -524,6 +530,23 @@ def _update_intercept_action():
         pass
 
 
+def _last_mode():
+    """What F9 should do: 'start' (launch + attach) or 'attach'."""
+    mode = (_ui_settings().get("f9_action") or "attach").lower()
+    return mode if mode in ("start", "attach") else "attach"
+
+
+def _set_last_mode(mode):
+    if mode not in ("start", "attach"):
+        return
+    if _last_mode() == mode:
+        return
+    _set_ui_setting("f9_action", mode)
+    _msg("F9 will now %s"
+         % ("start the target and attach" if mode == "start"
+            else "attach to the running target"))
+
+
 def rosetta_toggle_intercept():
     """Enable/disable taking over F9 and Attach to process."""
     enabled = not _intercept_enabled()
@@ -631,6 +654,7 @@ def rosetta_attach_pid_value(pid):
     entry["path"] = path
     _save_settings(entry)
     _msg("target from pid %d: %s" % (pid, path))
+    _set_last_mode("attach")
     return rosetta_attach("pid")
 
 
@@ -715,6 +739,7 @@ Start the program and attach
     pid = _start_target(path, args=args, env=env, cwd=cwd)
     if pid is None:
         return False
+    _set_last_mode("start")
     return rosetta_attach("start")
 
 
@@ -825,6 +850,12 @@ def _start_target(path, args=None, env=None, cwd=None):
     return None
 
 
+def rosetta_attach_action():
+    """Menu action: attach to the running target and make that F9's default."""
+    _set_last_mode("attach")
+    return rosetta_attach("menu")
+
+
 def rosetta_attach(reason=""):
     """Attach IDA's Remote GDB backend to the translated target."""
     t0 = time.time()
@@ -843,12 +874,16 @@ def rosetta_attach(reason=""):
               "Run ida_kernwin.rosetta_install_cfg() once, then restart IDA.")
         return False
 
+    mode = _last_mode()
     pid, vminfo = _find_process(path)
     if pid is None:
-        if LAUNCH_MODE != "always":
-            _hint("%s is not running.\nStart it with:\n    %s\nthen press F9 again."
+        if mode != "start":
+            _hint("%s is not running.\nStart it with:\n    %s\n"
+                  "or use Debugger > Rosetta > Pick and start..."
                   % (name, _launch_cmd(path)))
             return False
+        _msg("%s is not running; starting it (last action: pick and start)"
+             % name)
         pid = _start_target(path)
         if pid is None:
             return False
@@ -861,10 +896,10 @@ def rosetta_attach(reason=""):
 
     db_base = idaapi.get_imagebase()
     if base != db_base:
-        if LAUNCH_MODE != "always":
+        if mode != "start":
             _hint("%s (pid %d) runs at 0x%x but the database uses 0x%x.\n"
                   "Restart it so the addresses match:\n    %s\n"
-                  "(or set LAUNCH_MODE=\"always\" and press F9 again)"
+                  "(or use Debugger > Rosetta > Pick and start...)"
                   % (name, pid, base, db_base, _launch_cmd(path)))
             return False
         _msg("%s has ASLR (0x%x); restarting it" % (name, base))
@@ -1046,7 +1081,7 @@ _ACTION_FNS = {
     "intercept": rosetta_toggle_intercept,
     "pick": _pick_target,
     "pid": rosetta_attach_pid,
-    "attach": rosetta_attach,
+    "attach": rosetta_attach_action,
     "doctor": rosetta_doctor,
     "rebuild": rosetta_rebuild,
 }
@@ -1123,6 +1158,7 @@ def install():
     ida_kernwin.rosetta_start = rosetta_start_dialog
     ida_kernwin.rosetta_attach_pid = rosetta_attach_pid
     ida_kernwin.rosetta_toggle_intercept = rosetta_toggle_intercept
+    ida_kernwin.rosetta_set_f9_mode = _set_last_mode
 
     _msg("v%s installed: menu Debugger > Rosetta; F9 interception is %s "
          "(port %d)" % (__version__,

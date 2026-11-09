@@ -49,6 +49,15 @@ IDA (arm64)                                   translated x86_64 process
    `ida_dbg.attach_process(pid, -1)`.
 3. IDA applies the database's breakpoints and continues.
 
+## Screenshots
+
+| | |
+|---|---|
+| `Debugger → Rosetta` submenu | ![menu](docs/images/menu.png) |
+| Pick and start (path, arguments, cwd, environment) | ![start dialog](docs/images/start-dialog.png) |
+| Attach by process (filterable list) | ![process chooser](docs/images/process-chooser.png) |
+| Output log | ![output](docs/images/output-log.png) |
+
 ## Requirements
 
 * IDA Pro 9.x, **arm64** build, on Apple Silicon
@@ -67,7 +76,7 @@ ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.4.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
+[rosetta] v0.5.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
@@ -110,6 +119,14 @@ Or start the target yourself and press **F9** after enabling the toggle once:
 While **use for F9 / Attach to process** is off, the plugin does not touch those
 actions at all — IDA handles them natively (and will fail for a translated
 target); the menu entries keep working either way.
+
+When the toggle is on, **F9 replays the last action you picked**:
+
+* after *Pick and start…* → F9 starts the program (same args/cwd/env) and attaches;
+* after *Attach to running target* or *Attach by process…* → F9 attaches to the
+  running program (and tells you to start it if it is not).
+
+That choice is stored as `ui.f9_action` (`start` / `attach`) in `settings.json`.
 
 Console helpers:
 

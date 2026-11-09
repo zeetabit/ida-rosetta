@@ -30,6 +30,20 @@ F9 / Attach to process
 The target must load at the database's base, hence the bundled `noaslr`
 launcher (`posix_spawn` with `POSIX_SPAWN_DISABLE_ASLR = 0x0100`).
 
+### F9 semantics
+
+Taking over IDA's own actions is opt-in (`ui.intercept_f9`, default off) and,
+when enabled, F9 *replays the last explicit action* rather than always doing the
+same thing:
+
+| last menu action | F9 behaviour |
+|---|---|
+| `Pick and start…` | if not running: launch with the stored args/cwd/env, then attach; if running: just attach |
+| `Attach to running target`, `Attach by process…` | attach; if not running, print the launcher command |
+
+The choice lives in `ui.f9_action` (`start` / `attach`), so the plugin never
+surprises you by spawning a second copy of the target.
+
 ## Evidence
 
 ### IDA 9.5 arm64 ships no Rosetta support
@@ -150,6 +164,12 @@ the 0.x flat layout (`<idb path> -> {...}`) migrate on read.
 6. The stub must be idle (no `--attach`); IDA sends `vAttach`.
 7. Probe "is the stub listening?" with `lsof`, never with a TCP connect — the
    stub exits when its only client disconnects.
+8. `attach_action_to_menu("Debugger/", …)` returns `False`: nested menu paths
+   only resolve for menus that already exist. Create the menu first
+   (`create_menu(name, label, anchor)`), then attach to `"<name>/"`.
+9. In `ida_kernwin.Form`, `BUTTON YES/NO/CANCEL NONE` **hides** that button.
+   A dialog with OK/Cancel is `BUTTON YES* OK`, `BUTTON NO NONE`,
+   `BUTTON CANCEL Cancel`.
 
 ## Alternatives
 
