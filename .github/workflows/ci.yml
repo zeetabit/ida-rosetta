@@ -18,6 +18,8 @@ jobs:
             tests/rsp_probe.py \
             examples/fallingwhale_helper.py \
             examples/generic_helper.py
+      - name: Install guard
+        run: sh tests/test_install.sh
       - name: Breakpoint type guard
         run: |
           if grep -RnE '^[^#]*add_bpt\(.*BPT_BRK' plugin tools examples tests 2>/dev/null; then

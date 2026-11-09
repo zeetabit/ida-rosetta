@@ -41,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 import hashlib
 import json

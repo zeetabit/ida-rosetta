@@ -1,12 +1,14 @@
 # Convenience targets. The plugin itself needs no build.
 
 PLUGIN_LINK := $(HOME)/.idapro/plugins/rosetta.py
+PLUGIN_SRC  := $(CURDIR)/plugin/rosetta.py
 STATE_DIR   := $(HOME)/.idapro/plugins/ida-rosetta
 PY          := python3
+FORCE       ?= 0
 
-.PHONY: all check launcher install uninstall clean
+.PHONY: all check check-install launcher install status uninstall clean
 
-all: check launcher
+all: check check-install launcher
 
 check:
 	$(PY) -m py_compile \
@@ -22,14 +24,36 @@ launcher:
 	$(MAKE) -C launcher
 
 install:
-	@mkdir -p "$(dir $(PLUGIN_LINK))"
-	ln -sfn "$(CURDIR)/plugin/rosetta.py" "$(PLUGIN_LINK)"
-	@echo "installed: $(PLUGIN_LINK)"
+	@sh tools/install_plugin.sh "$(PLUGIN_SRC)" "$(PLUGIN_LINK)" "$(FORCE)"
 	@echo "restart IDA, then check 'Debugger > Rosetta'"
 
+check-install:
+	@sh tests/test_install.sh
+
+status:
+	@dest="$(PLUGIN_LINK)"; \
+	if [ -L "$$dest" ]; then \
+		echo "symlink : $$dest -> $$(readlink "$$dest")"; \
+	elif [ -e "$$dest" ]; then \
+		echo "FILE    : $$dest (not a symlink)"; \
+	else \
+		echo "missing : $$dest"; \
+	fi
+
 uninstall:
-	rm -f "$(PLUGIN_LINK)"
-	@echo "unlinked $(PLUGIN_LINK)"
+	@dest="$(PLUGIN_LINK)"; src="$(PLUGIN_SRC)"; \
+	if [ -L "$$dest" ]; then \
+		cur=$$(readlink "$$dest" 2>/dev/null || true); \
+		if [ "$$cur" = "$$src" ]; then \
+			rm -f "$$dest"; echo "unlinked $$dest"; \
+		else \
+			echo "refusing: $$dest -> $$cur (not this checkout)" >&2; exit 1; \
+		fi; \
+	elif [ -e "$$dest" ]; then \
+		echo "refusing: $$dest is not a symlink; remove it manually" >&2; exit 1; \
+	else \
+		echo "not installed: $$dest"; \
+	fi
 	@echo "state (safe to delete): $(STATE_DIR)"
 
 clean:

@@ -70,13 +70,21 @@ IDA (arm64)                                   translated x86_64 process
 
 ```bash
 git clone https://github.com/zeetabit/ida-rosetta.git
-cd ida-rosetta && make install      # symlinks plugin/rosetta.py into ~/.idapro/plugins
+cd ida-rosetta && make install      # symlinks plugin/rosetta.py; never overwrites
+make status                         # symlink / file / missing
+# if something is already at ~/.idapro/plugins/rosetta.py:
+#   make install FORCE=1            # backs up a regular file, replaces a symlink
 ```
+
+`make install` is idempotent: it reports *already installed* when the symlink
+already points at this checkout, refuses to clobber a regular file or a foreign
+symlink, and keeps a timestamped `.bak.*` when `FORCE=1` replaces a file.
+`make uninstall` only removes a symlink that points at this checkout.
 
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.5.0 installed: menu Debugger > Rosetta; F9 interception is OFF (port 1239)
+[rosetta] v0.7.2 installed: menu Debugger > Rosetta; F9 interception is OFF (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 

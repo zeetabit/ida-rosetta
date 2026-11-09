@@ -1,6 +1,19 @@
 # Changelog
 
+## 0.7.2
+- **Safe `make install`.** The old target used `ln -sfn`, which silently
+  replaces a regular file or a foreign symlink at
+  `~/.idapro/plugins/rosetta.py`. It now:
+  - is idempotent when the link already points at this checkout;
+  - refuses to clobber a regular file or a symlink to another checkout;
+  - `make install FORCE=1` backs a regular file up to
+    `rosetta.py.bak.<timestamp>` before linking;
+  - never replaces a directory.
+- Added `make status`, `make check-install`, and `tests/test_install.sh`; the
+  guard runs in CI.
+
 ## 0.7.1
+
 - **Assist-script fast path.** `rosetta_headless(..., base=0x...)` skips the
   ~1.5 s `vmmap` query when the runtime base is known (no-ASLR launcher).
   `_pid_path()` resolves the executable with `ps`, and `vmmap` results are
