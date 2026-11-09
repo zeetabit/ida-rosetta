@@ -254,6 +254,29 @@ ida_kernwin.rosetta_set_f9_mode(mode)   # "start" or "attach"
 
 ---
 
+### Automation / MCP
+
+Any client that can run IDAPython inside the GUI instance — IDA Assist's MCP, a
+script, the IDA console — can drive the plugin by name. No extra server is
+needed:
+
+```python
+ida_kernwin.rosetta_attach()            # attach to the stored target
+ida_kernwin.rosetta_headless(pid=… )    # attach without UI; returns a dict
+ida_kernwin.rosetta_doctor()            # report as a dict (key -> value)
+ida_kernwin.rosetta_detach()
+ida_kernwin.rosetta_set_f9_mode("attach")   # or "start"
+```
+
+Notes for automated clients:
+
+* `rosetta_start()` and `rosetta_attach_pid()` are **interactive** (file
+  dialog / process chooser) — prefer `rosetta_attach()` or
+  `rosetta_headless()`.
+* `rosetta_headless()` is the same function the `idat` driver uses; it pumps
+  the debugger itself and returns `{ok, error, pid, rip, registers, …}`.
+* The GUI instance stays fully usable during and after the attach.
+
 ## 10. A typical session
 
 1. Open the database; confirm `rosetta_doctor()` is green (§1).
