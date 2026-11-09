@@ -11,8 +11,11 @@ This plugin drives IDA's **Remote GDB** backend against that stub, so after the
 attach everything (registers, memory, breakpoints, stepping, modules) is the
 normal IDA debugger.
 
-> **Status:** 0.1.0 — early, works on IDA 9.x arm64 / macOS 26.x. Not a debugger
-> backend: it automates the attach that IDA cannot do by itself.
+> **Status:** functional on IDA 9.x arm64 with the Rosetta debugserver, tested
+> on macOS 26.x. It is not a debugger backend: it automates the Remote GDB
+> attach — plus the config and launcher work — that IDA cannot do by itself.
+> Breakpoints, stepping, registers and memory are IDA's own Remote GDB backend.
+> See [CHANGELOG.md](CHANGELOG.md) for the current version.
 
 ## Why
 
