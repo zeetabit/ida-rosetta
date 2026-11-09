@@ -67,7 +67,7 @@ ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.1.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
+[rosetta] v0.2.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
@@ -84,18 +84,31 @@ file.)
 
 ## Use
 
-1. `Edit → Plugins → "Rosetta debug"` → pick the program (remembered per idb).
-2. Start it with the launcher:
-   ```bash
-   ~/.idapro/plugins/ida-rosetta/noaslr /path/to/program
-   ```
-   or set `LAUNCH_MODE = "always"` in the plugin and let F9 start it.
-3. Press **F9** (or `Debugger → Attach to process…`).
+`Debugger → Rosetta` gives you:
+
+| entry | what it does |
+|---|---|
+| **pick and start…** | dialog with program path, arguments, working directory and environment (`KEY=VALUE …`); starts it with the bundled launcher, then attaches |
+| **pick program…** | only remembers the program for this database |
+| **attach by process…** | filterable list of running processes (PID / name / command); attaches to the selected one |
+| **attach to running target** | attaches to the already-selected program |
+| **doctor / prerequisites** | version, launcher stamp, stub path, config-patch state, image bases |
+| **rebuild launcher** | forces a rebuild from the embedded source |
+
+`Edit → Plugins → "Rosetta debug"` runs **pick and start…** as well.
+
+Or start the target yourself and press **F9**:
+
+```bash
+~/.idapro/plugins/ida-rosetta/noaslr /path/to/program
+```
 
 Console helpers:
 
 ```python
-ida_kernwin.rosetta_attach()        # attach manually
+ida_kernwin.rosetta_start()         # the pick-and-start dialog
+ida_kernwin.rosetta_attach_pid()    # process chooser
+ida_kernwin.rosetta_attach()        # attach to the current target
 ida_kernwin.rosetta_pick()          # choose another program
 ida_kernwin.rosetta_doctor()        # compatibility / upgrade report
 ida_kernwin.rosetta_rebuild()       # force launcher rebuild

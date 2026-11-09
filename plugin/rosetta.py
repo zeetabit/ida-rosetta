@@ -17,12 +17,16 @@
 #
 # Usage
 # -----
-#   1. Edit > Plugins > "Rosetta debug"  -> pick the program (remembered per idb)
-#   2. Start it at its static base, e.g.
-#          ~/.idapro/plugins/ida-rosetta/noaslr /path/to/program
-#      (the launcher is compiled from the embedded source on first use)
-#      or set LAUNCH_MODE = "always" and let F9 start it for you
-#   3. F9 (or Debugger > "Attach to process...")
+#   Debugger > Rosetta:
+#     "pick and start..."     program + arguments + cwd + environment; starts it
+#                              with the bundled launcher and attaches
+#     "pick program..."       only remembers the program for this idb
+#     "attach by process..."  filterable process list (pid/name/command)
+#     "attach to running target", "doctor / prerequisites", "rebuild launcher"
+#
+#   Start the program yourself instead with:
+#          ~/.idapro/plugins/ida-rosetta/noaslr [args] /path/to/program
+#   then press F9 (or Debugger > "Attach to process...").
 #
 # Requirements
 # ------------
@@ -34,12 +38,13 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import hashlib
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import signal
@@ -67,7 +72,7 @@ LAUNCH_MODE = "never"
 
 # Source of the launcher. Compiled on first use into
 #   <user idadir>/plugins/ida-rosetta/noaslr
-# and rebuilt automatically when __version__ or this text changes.
+# and rebuilt automatically when this text changes.
 NOASLR_C = r'''
 // noaslr -- run a program with ASLR disabled (POSIX_SPAWN_DISABLE_ASLR)
 //
@@ -302,7 +307,6 @@ def _launcher(force=False):
     fresh = (
         os.path.isfile(LAUNCHER)
         and os.access(LAUNCHER, os.X_OK)
-        and state.get("plugin_version") == __version__
         and state.get("c_source_sha256") == src_hash
     )
     if fresh and not force:
@@ -310,8 +314,7 @@ def _launcher(force=False):
 
     if not fresh:
         why = ("not built" if not os.path.isfile(LAUNCHER)
-               else "plugin %s -> %s or new launcher source"
-               % (state.get("plugin_version", "?"), __version__))
+               else "embedded launcher source changed")
         _msg("launcher needs a (re)build: %s" % why)
 
     if _build_launcher(src_hash):
@@ -330,15 +333,43 @@ def rosetta_rebuild():
     return _launcher(force=True) is not None
 
 
-def _launch_cmd(path, extra_args=None):
+def _env_tokens(env_text):
+    """Parse "K=V K2=V2" (spaces or newlines) into shell tokens."""
+    text = (env_text or "").replace("\n", " ").strip()
+    if not text:
+        return []
+    try:
+        toks = shlex.split(text)
+    except ValueError:
+        return None
+    return toks if all("=" in t for t in toks) else None
+
+
+def _launch_cmd(path, args=None, env=None, cwd=None):
     entry = _settings()
-    args = (extra_args if extra_args is not None
-            else (entry.get("args") or "")).strip()
+    args = (entry.get("args") or "") if args is None else args
+    env = (entry.get("env") or "") if env is None else env
+    cwd = (entry.get("cwd") or "") if cwd is None else cwd
+    args = args.strip()
+
+    toks = _env_tokens(env)
+    if toks is None:
+        _msg("ignoring malformed environment string (need KEY=VALUE)")
+        toks = []
+
     exe = _launcher()
-    parts = [shlex.quote(exe or path), shlex.quote(path)]
+    parts = []
+    if toks:
+        parts.append("env " + " ".join(shlex.quote(t) for t in toks))
+    if exe:
+        parts.append(shlex.quote(exe))
+    parts.append(shlex.quote(path))
     if args:
         parts.append(args)
-    return " ".join(parts)
+    cmd = " ".join(parts)
+    if cwd.strip():
+        cmd = "cd %s && %s" % (shlex.quote(cwd.strip()), cmd)
+    return cmd
 
 
 # ----------------------------------------------------------- IDA gdb config
@@ -497,6 +528,154 @@ def _pick_target():
     return path
 
 
+def _pid_exe(pid):
+    """Resolve (executable path, image base) of a pid through vmmap."""
+    info = _vmmap(pid)
+    for line in info.splitlines():
+        if "__TEXT" not in line:
+            continue
+        for tok in reversed(line.split()):
+            if tok.startswith("/"):
+                return tok, _image_base(info, os.path.basename(tok))
+    return None, None
+
+
+class _ProcessChooser(ida_kernwin.Choose):
+    """Modal process list; the chooser's search box filters by name."""
+
+    def __init__(self, rows):
+        ida_kernwin.Choose.__init__(
+            self,
+            "Select a process to attach",
+            [["PID", 8], ["Name", 26], ["Command", 70]],
+            flags=ida_kernwin.Choose.CH_MODAL,
+        )
+        self.rows = rows
+
+    def OnGetSize(self):
+        return len(self.rows)
+
+    def OnGetLine(self, n):
+        return self.rows[n]
+
+
+def _process_rows():
+    r = _run(["ps", "-axo", "pid=,comm=,command="], timeout=10)
+    rows = []
+    for line in (r.stdout.splitlines() if r else []):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            continue
+        pid, name = parts[0], parts[1]
+        cmd = parts[2] if len(parts) > 2 else name
+        rows.append([pid, name[:26], cmd[:70]])
+    # real executables first, then the rest, each group alphabetically
+    rows.sort(key=lambda row: (0 if "/" in row[2] else 1, row[1].lower()))
+    return rows
+
+
+def rosetta_attach_pid_value(pid):
+    path, _base = _pid_exe(pid)
+    if not path:
+        _hint("cannot resolve the executable of pid %d" % pid)
+        return False
+    if not _is_x86_64(path):
+        _hint("%s (pid %d) is not an x86_64 binary" % (path, pid))
+        return False
+    entry = _settings()
+    entry["path"] = path
+    _save_settings(entry)
+    _msg("target from pid %d: %s" % (pid, path))
+    return rosetta_attach("pid")
+
+
+def rosetta_attach_pid():
+    """Pick a running process from a filterable list and attach to it."""
+    try:
+        rows = _process_rows()
+        if rows:
+            idx = _ProcessChooser(rows).Show(True)
+            if idx is None or idx < 0:
+                _msg("cancelled")
+                return False
+            return rosetta_attach_pid_value(int(rows[idx][0]))
+    except Exception as exc:
+        _msg("process list failed (%r); falling back to a PID prompt" % (exc,))
+    pid = ida_kernwin.ask_long(0, "PID to attach to:")
+    if not pid:
+        return False
+    return rosetta_attach_pid_value(int(pid))
+
+
+def rosetta_start_dialog():
+    """Pick a program, edit args/cwd/env, start it, attach."""
+    entry = _settings()
+    path = entry.get("path") or _target_path() or os.path.expanduser("~")
+    args = entry.get("args") or ""
+    cwd = entry.get("cwd") or (os.path.dirname(path) if path else "")
+    env = entry.get("env") or ""
+
+    try:
+        form = ida_kernwin.Form(
+            r"""BUTTON YES NONE
+BUTTON NO NONE
+BUTTON CANCEL NONE
+Start the program and attach
+
+<Program path:{iPath}>
+<Arguments:{iArgs}>
+<Working directory:{iDir}>
+<Environment (KEY=VALUE ...):{iEnv}>
+""",
+            {
+                "iPath": ida_kernwin.Form.FileInput(open=True),
+                "iArgs": ida_kernwin.Form.StringInput(),
+                "iDir": ida_kernwin.Form.DirInput(),
+                "iEnv": ida_kernwin.Form.StringInput(),
+            },
+        )
+        form.Compile()
+        form.iPath.value = path
+        form.iArgs.value = args
+        form.iDir.value = cwd
+        form.iEnv.value = env
+        if form.Execute() != 1:
+            form.Free()
+            _msg("cancelled")
+            return False
+        path = form.iPath.value.strip()
+        args = form.iArgs.value.strip()
+        cwd = form.iDir.value.strip()
+        env = form.iEnv.value.strip()
+        form.Free()
+    except Exception as exc:
+        _msg("start dialog unavailable (%r); using the file picker" % (exc,))
+        picked = ida_kernwin.ask_file(False, path, "Select the program to debug")
+        if not picked:
+            return False
+        path, cwd = picked, os.path.dirname(picked)
+
+    if not path or not os.path.isfile(path):
+        _hint("no such file: %s" % path)
+        return False
+    if not _is_x86_64(path):
+        _hint("%s has no x86_64 slice" % os.path.basename(path))
+        return False
+    if _env_tokens(env) is None:
+        _hint("environment must be KEY=VALUE pairs")
+        return False
+
+    entry.update(path=path, args=args, cwd=cwd, env=env)
+    _save_settings(entry)
+    pid = _start_target(path, args=args, env=env, cwd=cwd)
+    if pid is None:
+        return False
+    return rosetta_attach("start")
+
+
 def _is_x86_64(path):
     r = _run(["lipo", "-archs", path], timeout=10)
     archs = (r.stdout if r and r.returncode == 0 else "").split()
@@ -587,8 +766,8 @@ def _ensure_stub():
     return False
 
 
-def _start_target(path):
-    cmd = _launch_cmd(path)
+def _start_target(path, args=None, env=None, cwd=None):
+    cmd = _launch_cmd(path, args=args, env=env, cwd=cwd)
     script = 'tell application "Terminal" to do script "%s"' % (
         cmd.replace("\\", "\\\\").replace('"', '\\"'))
     r = _run(["osascript", "-e", script], timeout=15)
@@ -788,6 +967,41 @@ class _UiHooks(ida_kernwin.UI_Hooks):
         return 1
 
 
+class _Action(ida_kernwin.action_handler_t):
+    def __init__(self, fn):
+        ida_kernwin.action_handler_t.__init__(self)
+        self.fn = fn
+
+    def activate(self, ctx):
+        try:
+            self.fn()
+        except Exception as exc:
+            _msg("action failed: %r" % (exc,))
+        return 1
+
+    def update(self, ctx):
+        return ida_kernwin.AST_ENABLE_ALWAYS
+
+
+_ACTION_FNS = {
+    "start": rosetta_start_dialog,
+    "pick": _pick_target,
+    "pid": rosetta_attach_pid,
+    "attach": rosetta_attach,
+    "doctor": rosetta_doctor,
+    "rebuild": rosetta_rebuild,
+}
+
+_ACTIONS = (
+    ("rosetta:start", "Rosetta: pick and start...", "start"),
+    ("rosetta:pick", "Rosetta: pick program...", "pick"),
+    ("rosetta:attach_pid", "Rosetta: attach by process...", "pid"),
+    ("rosetta:attach", "Rosetta: attach to running target", "attach"),
+    ("rosetta:doctor", "Rosetta: doctor / prerequisites", "doctor"),
+    ("rosetta:rebuild", "Rosetta: rebuild launcher", "rebuild"),
+)
+
+
 class RosettaPlugin(idaapi.plugin_t):
     flags = idaapi.PLUGIN_KEEP
     comment = "Debug x86_64/Rosetta targets through the Rosetta GDB stub"
@@ -801,10 +1015,7 @@ class RosettaPlugin(idaapi.plugin_t):
         return idaapi.PLUGIN_KEEP
 
     def run(self, arg):
-        path = _pick_target()
-        if path:
-            _hint("target: %s\nStart it with:\n    %s\nthen press F9."
-                  % (os.path.basename(path), _launch_cmd(path)))
+        rosetta_start_dialog()
 
     def term(self):
         uninstall()
@@ -832,6 +1043,8 @@ def install():
     else:
         _msg("could not install the debugger hook")
 
+    _install_actions()
+
     ida_kernwin.rosetta_attach = rosetta_attach
     ida_kernwin.rosetta_pick = _pick_target
     ida_kernwin.rosetta_go = rosetta_go
@@ -839,6 +1052,8 @@ def install():
     ida_kernwin.rosetta_doctor = rosetta_doctor
     ida_kernwin.rosetta_rebuild = rosetta_rebuild
     ida_kernwin.rosetta_install_cfg = rosetta_install_cfg
+    ida_kernwin.rosetta_start = rosetta_start_dialog
+    ida_kernwin.rosetta_attach_pid = rosetta_attach_pid
 
     _msg("v%s installed: F9 / Attach to process -> Rosetta attach (port %d)"
          % (__version__, PORT))
@@ -847,7 +1062,37 @@ def install():
              "ida_kernwin.rosetta_install_cfg() and restart IDA")
 
 
+def _install_actions():
+    for desc, _handler in getattr(ida_kernwin, "_rosetta_actions", []):
+        try:
+            ida_kernwin.detach_action_from_menu("Debugger/", desc.name)
+            ida_kernwin.unregister_action(desc.name)
+        except Exception:
+            pass
+    installed = []
+    for name, label, kind in _ACTIONS:
+        handler = _Action(_ACTION_FNS[kind])
+        desc = ida_kernwin.action_desc_t(name, label, handler)
+        if not ida_kernwin.register_action(desc):
+            _msg("could not register action %s" % name)
+            continue
+        ida_kernwin.attach_action_to_menu("Debugger/", name,
+                                          ida_kernwin.SETMENU_APP)
+        installed.append((desc, handler))
+    ida_kernwin._rosetta_actions = installed
+
+
 def uninstall():
+    for desc, _handler in getattr(ida_kernwin, "_rosetta_actions", []):
+        try:
+            ida_kernwin.detach_action_from_menu("Debugger/", desc.name)
+        except Exception:
+            pass
+        try:
+            ida_kernwin.unregister_action(desc.name)
+        except Exception:
+            pass
+    ida_kernwin._rosetta_actions = []
     for attr in ("_rosetta_ui_hook", "_rosetta_dbg_hook"):
         hook = getattr(ida_kernwin, attr, None)
         if hook is not None:
