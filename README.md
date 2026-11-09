@@ -84,9 +84,10 @@ file.)
 
 ## Use
 
-`Debugger → Rosetta` is a submenu (created at install time). The single
-`Edit → Plugins → "Rosetta debug"` entry opens the same list as a chooser, so
-every option is reachable from both places.
+`Rosetta` is a real submenu, created at install time in two places — under
+**Debugger** (primary) and next to the plugin entry in **Edit → Plugins** — with
+the same actions. The `Edit → Plugins → "Rosetta debug"` entry itself runs
+*pick and start…*.
 
 | entry | what it does |
 |---|---|

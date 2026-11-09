@@ -38,7 +38,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 import hashlib
 import json
@@ -624,9 +624,9 @@ def rosetta_start_dialog():
 
     try:
         form = ida_kernwin.Form(
-            r"""BUTTON YES NONE
+            r"""BUTTON YES* OK
 BUTTON NO NONE
-BUTTON CANCEL NONE
+BUTTON CANCEL Cancel
 Start the program and attach
 
 <Program path:{iPath}>
@@ -1005,49 +1005,13 @@ _ACTIONS = (
     ("rosetta:rebuild", "Rebuild launcher", "rebuild"),
 )
 
-_MENU = "Rosetta"
-_MENU_ANCHOR = "Debugger/Start process"
-
-
-class _CommandsChooser(ida_kernwin.Choose):
-    """All commands, reachable from the single Edit > Plugins entry."""
-
-    KINDS = ("start", "pick", "pid", "attach", "doctor", "rebuild")
-    ROWS = (
-        ("Pick and start...", "choose a program, edit args/cwd/env, start it, attach"),
-        ("Pick program...", "remember a program for this database"),
-        ("Attach by process...", "filterable list of running processes"),
-        ("Attach to running target", "attach to the remembered program"),
-        ("Doctor / prerequisites", "print version, launcher, stub and config state"),
-        ("Rebuild launcher", "rebuild noaslr from the embedded source"),
-    )
-
-    def __init__(self):
-        ida_kernwin.Choose.__init__(
-            self,
-            "Rosetta",
-            [["Command", 28], ["What it does", 68]],
-            flags=ida_kernwin.Choose.CH_MODAL,
-        )
-
-    def OnGetSize(self):
-        return len(self.ROWS)
-
-    def OnGetLine(self, n):
-        return list(self.ROWS[n])
-
-
-def rosetta_menu():
-    """Command list shown by the plugin entry (Edit > Plugins > Rosetta debug)."""
-    try:
-        choose = _CommandsChooser()
-        idx = choose.Show(True)
-        if idx is None or idx < 0:
-            return False
-        return _ACTION_FNS[_CommandsChooser.KINDS[idx]]()
-    except Exception as exc:
-        _msg("command list failed: %r" % (exc,))
-        return False
+# Two submenus carry the same actions: the primary one in the Debugger menu and
+# a second one next to the plugin entry (Edit > Plugins).  A nested path only
+# resolves for menus that already exist, so each menu must be created first.
+_MENUS = (
+    ("Rosetta", "Debugger/Start process"),             # primary
+    ("RosettaPlugins", "Edit/Plugins/Rosetta debug"),  # next to the plugin entry
+)
 
 
 class RosettaPlugin(idaapi.plugin_t):
@@ -1063,7 +1027,7 @@ class RosettaPlugin(idaapi.plugin_t):
         return idaapi.PLUGIN_KEEP
 
     def run(self, arg):
-        rosetta_menu()
+        rosetta_start_dialog()
 
     def term(self):
         uninstall()
@@ -1102,7 +1066,6 @@ def install():
     ida_kernwin.rosetta_install_cfg = rosetta_install_cfg
     ida_kernwin.rosetta_start = rosetta_start_dialog
     ida_kernwin.rosetta_attach_pid = rosetta_attach_pid
-    ida_kernwin.rosetta_menu = rosetta_menu
 
     _msg("v%s installed: menu Debugger > Rosetta; F9 / Attach to process "
          "-> Rosetta attach (port %d)" % (__version__, PORT))
@@ -1111,32 +1074,37 @@ def install():
              "ida_kernwin.rosetta_install_cfg() and restart IDA")
 
 
-def _ensure_menu():
-    """Create the Rosetta menu (Debugger submenu if possible) and return its path."""
-    try:
-        if ida_kernwin.create_menu(_MENU, _MENU, _MENU_ANCHOR):
-            return _MENU + "/"
-    except Exception:
-        pass
-    try:
-        ida_kernwin.create_menu(_MENU, _MENU)          # top-level fallback
-    except Exception:
-        pass
-    return _MENU + "/"
+def _ensure_menus():
+    """Create both submenus; return the paths actions should be attached to."""
+    paths = []
+    for index, (name, anchor) in enumerate(_MENUS):
+        try:
+            ida_kernwin.create_menu(name, "Rosetta", anchor)
+        except Exception:
+            pass
+        if index == 0:
+            # if the anchor could not be resolved, fall back to a top-level menu
+            try:
+                ida_kernwin.create_menu(name, "Rosetta")
+            except Exception:
+                pass
+        paths.append(name + "/")
+    return paths
 
 
 def _install_actions():
     for desc, _handler in getattr(ida_kernwin, "_rosetta_actions", []):
-        try:
-            ida_kernwin.detach_action_from_menu(_MENU + "/", desc.name)
-        except Exception:
-            pass
+        for path in getattr(ida_kernwin, "_rosetta_menus", []):
+            try:
+                ida_kernwin.detach_action_from_menu(path, desc.name)
+            except Exception:
+                pass
         try:
             ida_kernwin.unregister_action(desc.name)
         except Exception:
             pass
 
-    menu = _ensure_menu()
+    menu_paths = _ensure_menus()
     installed = []
     for name, label, kind in _ACTIONS:
         handler = _Action(_ACTION_FNS[kind])
@@ -1144,31 +1112,38 @@ def _install_actions():
         if not ida_kernwin.register_action(desc):
             _msg("could not register action %s" % name)
             continue
-        if not ida_kernwin.attach_action_to_menu(menu, name,
-                                                 ida_kernwin.SETMENU_APP):
-            _msg("could not attach %s to %s" % (name, menu))
+        attached = False
+        for path in menu_paths:
+            try:
+                attached |= bool(ida_kernwin.attach_action_to_menu(
+                    path, name, ida_kernwin.SETMENU_APP))
+            except Exception:
+                pass
+        if not attached:
+            _msg("could not attach %s to any menu" % name)
         installed.append((desc, handler))
     ida_kernwin._rosetta_actions = installed
-    ida_kernwin._rosetta_menu = menu
+    ida_kernwin._rosetta_menus = menu_paths
 
 
 def uninstall():
-    menu = getattr(ida_kernwin, "_rosetta_menu", _MENU + "/")
     for desc, _handler in getattr(ida_kernwin, "_rosetta_actions", []):
-        try:
-            ida_kernwin.detach_action_from_menu(menu, desc.name)
-        except Exception:
-            pass
+        for path in getattr(ida_kernwin, "_rosetta_menus", []):
+            try:
+                ida_kernwin.detach_action_from_menu(path, desc.name)
+            except Exception:
+                pass
         try:
             ida_kernwin.unregister_action(desc.name)
         except Exception:
             pass
     ida_kernwin._rosetta_actions = []
-    try:
-        ida_kernwin.delete_menu(_MENU)
-    except Exception:
-        pass
-    ida_kernwin._rosetta_menu = None
+    for name, _anchor in _MENUS:
+        try:
+            ida_kernwin.delete_menu(name)
+        except Exception:
+            pass
+    ida_kernwin._rosetta_menus = []
     for attr in ("_rosetta_ui_hook", "_rosetta_dbg_hook"):
         hook = getattr(ida_kernwin, attr, None)
         if hook is not None:
