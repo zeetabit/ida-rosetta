@@ -53,10 +53,10 @@ IDA (arm64)                                   translated x86_64 process
 
 | | |
 |---|---|
-| `Debugger → Rosetta` submenu | ![menu](docs/images/menu.png) |
-| Pick and start (path, arguments, cwd, environment) | ![start dialog](docs/images/start-dialog.png) |
-| Attach by process (filterable list) | ![process chooser](docs/images/process-chooser.png) |
-| Output log | ![output](docs/images/output-log.png) |
+| `Debugger → Rosetta` submenu | ![menu](docs/images/menu.jpg) |
+| Pick and start (path, arguments, cwd, environment) | ![start dialog](docs/images/start-dialog.jpg) |
+| Attach by process (filterable list) | ![process chooser](docs/images/process-chooser.jpg) |
+| Output log | ![output](docs/images/output-log.jpg) |
 
 ## Requirements
 
