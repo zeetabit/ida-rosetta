@@ -191,6 +191,16 @@ $IDAUSR/cfg/dbg_gdb.cfg                       patched copy (config override)
 * Depends on the IDA action names above and on `ida_dbg`'s API.
 * One stub port (`1239`) per IDA instance.
 
+## Documentation
+
+* [docs/USAGE.md](docs/USAGE.md) — every menu entry, both workflows, F9
+  semantics, settings reference, console helpers
+* [docs/DESIGN.md](docs/DESIGN.md) — why this is an attach helper, the measured
+  stub behaviour, alternatives and the native debugger-module path
+* [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — version matrix and the
+  post-upgrade checklist
+* [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → cause → fix
+
 ## Troubleshooting
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Start with
