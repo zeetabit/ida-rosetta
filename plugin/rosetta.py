@@ -82,6 +82,9 @@ def _soft_bpt_type():
     follows the installed SDK instead of assuming the enum is always 4.
     """
     try:
+        value = getattr(ida_dbg, "BPT_SOFT", None)
+        if isinstance(value, int) and value > 0:
+            return value
         value = ida_dbg.bpt_t().type
         if isinstance(value, int) and value > 0:
             return value
