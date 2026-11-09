@@ -5,27 +5,18 @@ on:
   pull_request:
 
 jobs:
-  macos:
-    runs-on: macos-14
+  python:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Python syntax
+      - name: Syntax
         run: |
           python3 -m py_compile \
             plugin/rosetta.py \
             tools/ida_gdb_cfg.py \
             tests/rsp_probe.py \
             examples/fallingwhale_helper.py
-
-      - name: Build launcher (universal)
-        run: |
-          make -C launcher
-          lipo -info launcher/noaslr
-          launcher/noaslr --version
-          launcher/noaslr --help
-
-      - name: Config patcher (idempotent, with a synthetic fixture)
+      - name: Config patcher (idempotent, synthetic fixture)
         run: |
           cat > /tmp/dbg_gdb.cfg <<'CFG'
           {
@@ -38,9 +29,24 @@ jobs:
             }
           }
           CFG
-          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check && exit 1 || true
+          if python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check; then
+            echo "unexpectedly patched before apply"; exit 1
+          fi
           python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --apply
           python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check
           python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --apply
           python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --revert
-          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check && exit 1 || true
+          if python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check; then
+            echo "revert did not restore the pristine file"; exit 1
+          fi
+
+  launcher:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal launcher
+        run: |
+          make -C launcher
+          lipo -info launcher/noaslr
+          launcher/noaslr --version
+          launcher/noaslr --help
