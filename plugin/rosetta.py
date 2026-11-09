@@ -310,6 +310,10 @@ def _launcher(force=False):
         and state.get("c_source_sha256") == src_hash
     )
     if fresh and not force:
+        if state.get("plugin_version") != __version__:
+            # same launcher source: keep the binary, refresh the stamp only
+            state["plugin_version"] = __version__
+            _write_json(LAUNCHER_STATE, state)
         return LAUNCHER
 
     if not fresh:
