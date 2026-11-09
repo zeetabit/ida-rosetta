@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile \
+            plugin/rosetta.py \
+            tools/ida_gdb_cfg.py \
+            tests/rsp_probe.py \
+            examples/fallingwhale_helper.py
+
+      - name: Build launcher (universal)
+        run: |
+          make -C launcher
+          lipo -info launcher/noaslr
+          launcher/noaslr --version
+          launcher/noaslr --help
+
+      - name: Config patcher (idempotent, with a synthetic fixture)
+        run: |
+          cat > /tmp/dbg_gdb.cfg <<'CFG'
+          {
+            "i386:x86-64":
+            {
+              "org.gnu.gdb.i386.core":
+              {
+                "title": "General registers"
+              }
+            }
+          }
+          CFG
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check && exit 1 || true
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --apply
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --apply
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --revert
+          python3 tools/ida_gdb_cfg.py --file /tmp/dbg_gdb.cfg --check && exit 1 || true

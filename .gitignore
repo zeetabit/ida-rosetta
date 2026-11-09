@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.o
+*.dSYM/
+launcher/noaslr
+launcher/noaslr.dSYM
+*.i64
+*.idb
+*.id0
+*.id1
+*.nam
+*.til
+.DS_Store
