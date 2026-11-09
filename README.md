@@ -67,7 +67,7 @@ ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.2.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
+[rosetta] v0.3.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
@@ -84,7 +84,9 @@ file.)
 
 ## Use
 
-`Debugger → Rosetta` gives you:
+`Debugger → Rosetta` is a submenu (created at install time). The single
+`Edit → Plugins → "Rosetta debug"` entry opens the same list as a chooser, so
+every option is reachable from both places.
 
 | entry | what it does |
 |---|---|
