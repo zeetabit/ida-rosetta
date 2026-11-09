@@ -61,7 +61,8 @@ Then open an issue with the doctor output and the two action names above.
 
 ## Removing
 
-1. Delete `~/.idapro/plugins/rosetta.py` (or the symlink).
-2. Delete `~/.idapro/plugins/ida-rosetta/`.
+1. Remove the plugin (`make uninstall` if this checkout installed it).
+2. Delete the plugin state directory (`$IDAUSR/plugins/ida-rosetta`;
+   `~/.idapro` by default).
 3. Delete the config override `$IDAUSR/cfg/dbg_gdb.cfg` if you no longer need it
    (IDA falls back to the installation copy).

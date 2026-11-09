@@ -46,7 +46,10 @@ surprises you by spawning a second copy of the target.
 
 ## Evidence
 
-### IDA 9.5 arm64 ships no Rosetta support
+### The tested IDA arm64 build has no Rosetta support
+
+The inventory below is from the tested build; installers and later versions can
+differ. In that build:
 
 | file | arch | comment |
 |---|---|---|
@@ -56,7 +59,7 @@ surprises you by spawning a second copy of the target.
 | `plugins/gdb_user.dylib` | arm64 | the backend used here |
 | `dbgsrv/mac_server*` | x86_64 / arm64 | signed `com.apple.security.cs.debugger`, use `task_for_pid` |
 
-`grep -a -r -i rosetta` over the whole bundle: **0 hits** in `ida`,
+`grep -a -r -i rosetta` over that bundle: **0 hits** in `ida`,
 `libida.dylib`, `arm_mac_user`, `mac_user`, `mac_server`, `mac_server_arm`,
 `gdb_user`. Only the dyld-shared-cache loader mentions Rosetta (static
 analysis).
@@ -175,8 +178,8 @@ the 0.x flat layout (`<idb path> -> {...}`) migrate on read.
 
 | approach | verdict |
 |---|---|
-| **Python action hook (this)** | same engine, ~1 day; no debugger-selector entry |
-| Native `debugger_t` module | the only way to get a real entry; self-contained but needs an RSP client (~1.5–2.5k LOC, 2–4 weeks). Delegating to `gdb_user` is impossible: no API exposes another backend's `debugger_t*` |
+| **Python action hook (this)** | same engine; no debugger-selector entry |
+| Native `debugger_t` module | the only way to get a real entry; self-contained but needs an RSP client. Delegating to `gdb_user` is impossible: no API exposes another backend's `debugger_t*` |
 | Patch `arm_mac_user`/`mac_server_arm` | breaks signatures, per-version maintenance |
 | Run the x86_64 IDA under Rosetta | still `task_for_pid`-based, not the Rosetta stub |
 | LLDB/Ghidra for execution | works (LLDB spawns the Rosetta stub natively) but loses IDA's debugger |
@@ -184,19 +187,15 @@ the 0.x flat layout (`<idb path> -> {...}`) migrate on read.
 
 ### Can IDA use LLDB?
 
-No built-in LLDB backend ships with IDA 9.5: the debugger modules are
-`arm_mac_user`, `gdb_user`, `ios_user`, `xnu_user`, `linux`, … (there is no
-`lldb_user`). The `lldb` strings in `libida` are DWARF/compiler tuning flags
-(`-debugger-tuning=lldb`), and the `dbg_ios.cfg`/`dbg_xnu.cfg` mentions are
-background on Apple's RNBRemote.
+No LLDB debugger backend is exposed to IDA in the tested build; IDA's
+integration point for remote targets is GDB RSP, which is what this plugin
+uses. Debugger module names and availability vary by IDA version and installer,
+so do not rely on a particular inventory.
 
-IDA can connect to a **GDB RSP server** — which is exactly what this plugin
-does with `/usr/libexec/rosetta/debugserver` — but it cannot drive LLDB as a
-backend. A process has one debugger owner; LLDB and IDA cannot both own it.
-Using LLDB means using LLDB's debugger UI, and losing IDA's database,
-decompiler and scripting. An LLDB-backed IDA plugin would have to implement
-`debugger_t` and delegate to LLDB's SB API; that is a much larger project than
-the RSP bridge and has no Rosetta-specific advantage.
+A process has one debugger owner; LLDB and IDA cannot both own it. Using LLDB
+means using LLDB's debugger UI and losing IDA's database, decompiler and
+scripting. An LLDB-backed IDA debugger would be a separate `debugger_t`
+implementation delegating to LLDB's SB API, not a configuration change.
 
 ### What IDA's docs say about custom debuggers
 

@@ -30,10 +30,10 @@ ida_kernwin.rosetta_doctor()
 A healthy report looks like this (values vary):
 
 ```
-plugin version          : 0.5.0
-IDA version             : 9.5 (arm64)
-launcher                : ~/.idapro/plugins/ida-rosetta/noaslr [ok]
-launcher state          : v0.5.0, src 04e2c8bad95a
+plugin version          : <version>
+IDA version             : <version> (arm64)
+launcher                : $IDAUSR/plugins/ida-rosetta/noaslr [ok]
+launcher state          : v<version>, src <hash>
 stub                    : /usr/libexec/rosetta/debugserver
 stub listening          : False
 dbg_gdb.cfg (install)   : /Applications/IDA…/cfg/dbg_gdb.cfg
@@ -368,10 +368,11 @@ The same helpers are on `ida_kernwin` (`rosetta_reg`, `rosetta_regs`,
 
 * Terminating or detaching the debuggee leaves the plugin idle; the stub exits
   when IDA disconnects.
-* `~/.idapro/plugins/ida-rosetta/` holds the built launcher, the extracted
+* `$IDAUSR/plugins/ida-rosetta/` holds the built launcher, the extracted
   source, `launcher.json`, `settings.json` and `stub.log`. Deleting it is safe:
   the launcher is rebuilt on demand.
-* `make uninstall` only removes the plugin symlink; state is left in place.
+* `make uninstall` removes only the plugin this checkout installed; state is
+  left in place.
 
 ---
 

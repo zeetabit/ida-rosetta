@@ -11,8 +11,8 @@ This plugin drives IDA's **Remote GDB** backend against that stub, so after the
 attach everything (registers, memory, breakpoints, stepping, modules) is the
 normal IDA debugger.
 
-> **Status:** functional on IDA 9.x arm64 with the Rosetta debugserver, tested
-> on macOS 26.x. It is not a debugger backend: it automates the Remote GDB
+> **Status:** targets IDA 9.x arm64 on Apple Silicon with the Rosetta
+> debugserver. It is not a debugger backend: it automates the Remote GDB
 > attach — plus the config and launcher work — that IDA cannot do by itself.
 > Breakpoints, stepping, registers and memory are IDA's own Remote GDB backend.
 > See [CHANGELOG.md](CHANGELOG.md) for the current version.
@@ -21,11 +21,12 @@ normal IDA debugger.
 
 | piece | reality |
 |---|---|
-| `arm_mac_user.dylib` | "Local ARM Mac OS debugger" — arm64 targets only |
-| `mac_user.dylib` (x86_64) | cannot be loaded by the arm64 IDA |
-| native `debugserver` | *"Trying to attach to a translated process with the native debugserver, exiting…"* |
-| `/usr/libexec/rosetta/debugserver` | arm64e GDB stub — the only way in |
-| GDB `vFile` | **not implemented** by that stub → IDA cannot *start* a process through it, only *attach* |
+| IDA's arm64 macOS debugger | arm64 targets only |
+| Apple's native `debugserver` | refuses translated processes |
+| Rosetta `debugserver` | GDB RSP stub; the supported controller |
+| GDB `vFile` | not implemented by that stub → IDA can attach, not start |
+
+Build-specific evidence is in [docs/DESIGN.md](docs/DESIGN.md).
 
 LLDB applies the same policy internally for its own client: when it sees a
 translated process it spawns/attaches through the Rosetta stub. That confirms
@@ -77,21 +78,21 @@ IDA (arm64)                                   translated x86_64 process
 
 ```bash
 git clone https://github.com/zeetabit/ida-rosetta.git
-cd ida-rosetta && make install      # symlinks plugin/rosetta.py; never overwrites
-make status                         # symlink / file / missing
-# if something is already at ~/.idapro/plugins/rosetta.py:
-#   make install FORCE=1            # backs up a regular file, replaces a symlink
+cd ida-rosetta && make install      # install into the IDA user plugin dir
+make status                         # show what is installed
+# if a plugin is already installed:
+#   make install FORCE=1            # back it up, then install
 ```
 
-`make install` is idempotent: it reports *already installed* when the symlink
-already points at this checkout, refuses to clobber a regular file or a foreign
-symlink, and keeps a timestamped `.bak.*` when `FORCE=1` replaces a file.
-`make uninstall` only removes a symlink that points at this checkout.
+`make install` is idempotent: it reports *already installed* when the plugin
+already comes from this checkout, refuses to clobber anything else, and keeps a
+timestamped `.bak.*` when `FORCE=1` replaces a file. `make uninstall` removes
+only the plugin this checkout installed.
 
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.7.2 installed: menu Debugger > Rosetta; F9 interception is OFF (port 1239)
+[rosetta] v<version> installed: menu Debugger > Rosetta; F9 interception is OFF (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
@@ -187,14 +188,16 @@ After an **IDA upgrade**:
 
 ## Files and state
 
+`$IDAUSR` is IDA's user directory (`~/.idapro` by default).
+
 ```
-~/.idapro/plugins/rosetta.py                  the plugin (symlink/copy)
-~/.idapro/plugins/ida-rosetta/noaslr          built launcher (universal)
-~/.idapro/plugins/ida-rosetta/noaslr.c        embedded source, written on build
-~/.idapro/plugins/ida-rosetta/launcher.json   version + source hash stamp
-~/.idapro/plugins/ida-rosetta/settings.json   per-idb target, args, break_off
-~/.idapro/plugins/ida-rosetta/stub.log        stub stderr
-$IDAUSR/cfg/dbg_gdb.cfg                       patched copy (config override)
+$IDAUSR/plugins/rosetta.py                 installed plugin
+$IDAUSR/plugins/ida-rosetta/noaslr         built launcher (universal)
+$IDAUSR/plugins/ida-rosetta/noaslr.c       embedded source, written on build
+$IDAUSR/plugins/ida-rosetta/launcher.json  version + source hash stamp
+$IDAUSR/plugins/ida-rosetta/settings.json  per-idb target, args, break_off
+$IDAUSR/plugins/ida-rosetta/stub.log       stub stderr
+$IDAUSR/cfg/dbg_gdb.cfg                    patched copy (config override)
 ```
 
 ## Limitations
