@@ -13,6 +13,7 @@
 
 import ida_kernwin
 import ida_dbg
+import idc
 
 
 def fw_solve(cont=False):
@@ -22,10 +23,12 @@ def fw_solve(cont=False):
     rdi = ida_dbg.get_reg_val("rdi")
     rsi = ida_dbg.get_reg_val("rsi")
     rdx = ida_dbg.get_reg_val("rdx")
-    raw = bytes(ida_dbg.read_dbg_memory(rdi, 64))
+    # IDA 9.x: idc.read_dbg_memory(ea, size) returns bytes;
+    # ida_dbg.read_dbg_memory(ea, buffer, size) needs an out-buffer.
+    raw = idc.read_dbg_memory(rdi, 64) or b""
     md5 = raw.split(b"\0")[0].decode("latin1")
     code = md5[:rsi]
-    ida_dbg.write_dbg_memory(rdx, code.encode() + b"\0")
+    idc.write_dbg_memory(rdx, code.encode() + b"\0")
     ida_kernwin.msg("[fw] MD5=%s len=%d -> wrote %r to 0x%x\n"
                     % (md5, rsi, code, rdx))
     if cont:
