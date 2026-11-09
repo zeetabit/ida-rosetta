@@ -38,7 +38,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 import hashlib
 import json
@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
 }
 '''
 
-_STATE = {"t0": 0.0, "pid": 0, "base": 0}
+_STATE = {"t0": 0.0, "pid": 0, "base": 0, "notified_off": False}
 _CFG_OK = None
 
 
@@ -494,6 +494,44 @@ def _settings_all():
 def _settings():
     entry = _settings_all()["targets"].get(_idb_key())
     return dict(entry) if isinstance(entry, dict) else {}
+
+
+def _ui_settings():
+    ui = _settings_all().get("ui")
+    return dict(ui) if isinstance(ui, dict) else {}
+
+
+def _set_ui_setting(key, value):
+    data = _settings_all()
+    ui = data.get("ui")
+    if not isinstance(ui, dict):
+        ui = {}
+    ui[key] = value
+    data["ui"] = ui
+    return _write_json(SETTINGS, data)
+
+
+def _intercept_enabled():
+    """Whether the plugin takes over F9 / Attach to process (default: no)."""
+    return bool(_ui_settings().get("intercept_f9", False))
+
+
+def _update_intercept_action():
+    try:
+        ida_kernwin.update_action_checked("rosetta:intercept",
+                                          _intercept_enabled())
+    except Exception:
+        pass
+
+
+def rosetta_toggle_intercept():
+    """Enable/disable taking over F9 and Attach to process."""
+    enabled = not _intercept_enabled()
+    _set_ui_setting("intercept_f9", enabled)
+    _update_intercept_action()
+    _hint("F9 / Attach to process interception %s"
+          % ("enabled" if enabled else "disabled (IDA handles them)"))
+    return enabled
 
 
 def _save_settings(entry):
@@ -958,6 +996,12 @@ class _UiHooks(ida_kernwin.UI_Hooks):
     def preprocess_action(self, name):
         if name not in ("ProcessStart", "ProcessAttach"):
             return 0
+        if not _intercept_enabled():
+            if _should_intercept() and not _STATE.get("notified_off"):
+                _STATE["notified_off"] = True
+                _msg("F9/attach left to IDA: Rosetta interception is off "
+                     "(enable it in Debugger > Rosetta)")
+            return 0
         if ida_dbg.is_debugger_on():
             return 0
         if not _should_intercept():
@@ -972,23 +1016,34 @@ class _UiHooks(ida_kernwin.UI_Hooks):
 
 
 class _Action(ida_kernwin.action_handler_t):
-    def __init__(self, fn):
+    def __init__(self, fn, name=None, checkable=False):
         ida_kernwin.action_handler_t.__init__(self)
         self.fn = fn
+        self.name = name
+        self.checkable = checkable
 
     def activate(self, ctx):
         try:
             self.fn()
         except Exception as exc:
             _msg("action failed: %r" % (exc,))
+        if self.checkable:
+            _update_intercept_action()
         return 1
 
     def update(self, ctx):
+        if self.checkable and self.name:
+            try:
+                ida_kernwin.update_action_checked(self.name,
+                                                  _intercept_enabled())
+            except Exception:
+                pass
         return ida_kernwin.AST_ENABLE_ALWAYS
 
 
 _ACTION_FNS = {
     "start": rosetta_start_dialog,
+    "intercept": rosetta_toggle_intercept,
     "pick": _pick_target,
     "pid": rosetta_attach_pid,
     "attach": rosetta_attach,
@@ -1003,6 +1058,7 @@ _ACTIONS = (
     ("rosetta:attach", "Attach to running target", "attach"),
     ("rosetta:doctor", "Doctor / prerequisites", "doctor"),
     ("rosetta:rebuild", "Rebuild launcher", "rebuild"),
+    ("rosetta:intercept", "Use for F9 / Attach to process", "intercept"),
 )
 
 # Two submenus carry the same actions: the primary one in the Debugger menu and
@@ -1066,9 +1122,11 @@ def install():
     ida_kernwin.rosetta_install_cfg = rosetta_install_cfg
     ida_kernwin.rosetta_start = rosetta_start_dialog
     ida_kernwin.rosetta_attach_pid = rosetta_attach_pid
+    ida_kernwin.rosetta_toggle_intercept = rosetta_toggle_intercept
 
-    _msg("v%s installed: menu Debugger > Rosetta; F9 / Attach to process "
-         "-> Rosetta attach (port %d)" % (__version__, PORT))
+    _msg("v%s installed: menu Debugger > Rosetta; F9 interception is %s "
+         "(port %d)" % (__version__,
+                        "ON" if _intercept_enabled() else "OFF", PORT))
     if not _cfg_ok():
         _msg("note: dbg_gdb.cfg lacks the Rosetta register map; run "
              "ida_kernwin.rosetta_install_cfg() and restart IDA")
@@ -1107,11 +1165,15 @@ def _install_actions():
     menu_paths = _ensure_menus()
     installed = []
     for name, label, kind in _ACTIONS:
-        handler = _Action(_ACTION_FNS[kind])
+        checkable = kind == "intercept"
+        handler = _Action(_ACTION_FNS[kind], name=name, checkable=checkable)
         desc = ida_kernwin.action_desc_t(name, label, handler)
         if not ida_kernwin.register_action(desc):
             _msg("could not register action %s" % name)
             continue
+        if checkable:
+            ida_kernwin.update_action_checkable(name, True)
+            ida_kernwin.update_action_checked(name, _intercept_enabled())
         attached = False
         for path in menu_paths:
             try:

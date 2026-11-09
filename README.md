@@ -67,7 +67,7 @@ ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.3.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
+[rosetta] v0.4.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
@@ -97,14 +97,19 @@ the same actions. The `Edit → Plugins → "Rosetta debug"` entry itself runs
 | **attach to running target** | attaches to the already-selected program |
 | **doctor / prerequisites** | version, launcher stamp, stub path, config-patch state, image bases |
 | **rebuild launcher** | forces a rebuild from the embedded source |
+| **use for F9 / Attach to process** | checkable toggle (remembered). **Off by default** — taking over IDA's own actions should be your decision, not the plugin's |
 
 `Edit → Plugins → "Rosetta debug"` runs **pick and start…** as well.
 
-Or start the target yourself and press **F9**:
+Or start the target yourself and press **F9** after enabling the toggle once:
 
 ```bash
 ~/.idapro/plugins/ida-rosetta/noaslr /path/to/program
 ```
+
+While **use for F9 / Attach to process** is off, the plugin does not touch those
+actions at all — IDA handles them natively (and will fail for a translated
+target); the menu entries keep working either way.
 
 Console helpers:
 
