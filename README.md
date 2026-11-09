@@ -27,8 +27,12 @@ normal IDA debugger.
 | `/usr/libexec/rosetta/debugserver` | arm64e GDB stub — the only way in |
 | GDB `vFile` | **not implemented** by that stub → IDA cannot *start* a process through it, only *attach* |
 
-LLDB does the same thing internally (it spawns the Rosetta stub for translated
-processes). This project is the same policy, applied to IDA.
+LLDB applies the same policy internally for its own client: when it sees a
+translated process it spawns/attaches through the Rosetta stub. That confirms
+the mechanism, not that IDA has it. IDA's arm64 backend cannot debug translated
+targets, and its Remote GDB mode does not know about the Rosetta stub. This
+plugin supplies the missing client-side policy so the session stays inside IDA
+(database, decompiler, cross-references, scripting, F9).
 
 ## How it works
 
