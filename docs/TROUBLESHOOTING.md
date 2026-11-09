@@ -11,7 +11,7 @@ target's runtime base.
 | F9 does nothing | target not selected, or not an x86_64 binary, or a debugger is already active | `ida_kernwin.rosetta_pick()`; check `target x86_64` in the doctor output |
 | F9 returns instantly with no attach | `ProcessStart` action not intercepted (name changed / plugin not installed) | check the Output for `[rosetta] vX installed`; see COMPATIBILITY.md |
 | `attach failed (-1)` | stub busy (`--attach`), process gone, or security software blocking | kill stale `rosetta/debugserver`, retry; add an exclusion |
-| attach works but no breakpoint hits | target started with ASLR (addresses don't match), or the breakpoint was set *after* attach in another session | restart with the launcher; `rosetta_doctor()` shows both bases |
+| attach works but no breakpoint hits | target started with ASLR (addresses don't match); or plugin < 0.6.1, which passed `BPT_BRK` (1 = `BPT_WRITE`) as the breakpoint type and made IDA send `Z2` (rejected with `E09`) | restart with the launcher; upgrade to 0.6.1+; `rosetta_doctor()` shows both bases. A raw `Z0` at the address should produce `T05` |
 | `could not detect architecture from target info` | `dbg_gdb.cfg` has no `com.apple.debugserver.x86_64` map | `ida_kernwin.rosetta_install_cfg()` + restart IDA |
 | registers show as `?`, memory reads fail | same missing register map, or manual memory regions not configured | apply the config override; optionally set `Debugger → Manual memory regions` |
 | `dbg_gdb.cfg` check fails after an IDA update | IDA replaced `cfg/dbg_gdb.cfg` and the old override became stale | re-run `rosetta_install_cfg()` (it refreshes from the new file) |

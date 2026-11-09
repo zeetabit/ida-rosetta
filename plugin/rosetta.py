@@ -41,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 import hashlib
 import json
@@ -68,6 +68,36 @@ STUB_CANDIDATES = (
     "/Library/Apple/usr/libexec/oah/debugserver",
 )
 PORT = 1239
+
+# ida_dbg.add_bpt(ea, size, type): the third argument is a *bpttype_t*, not one
+# of the BPT_* flag bits. BPT_BRK happens to be 1, which in bpttype_t means
+# BPT_WRITE -- so add_bpt(ea, 1, BPT_BRK) creates a one-byte write watchpoint.
+# The GDB backend then sends "Z2" and the Rosetta stub answers E09, meaning the
+# breakpoint is listed in IDA but never fires. Execution breakpoints are size 0
+# and type BPT_SOFT.
+def _soft_bpt_type():
+    """BPT_SOFT is not exported to IDAPython; ask IDA for its value.
+
+    bpt_t()'s constructor initializes .type to BPT_SOFT (see idd.hpp), so this
+    follows the installed SDK instead of assuming the enum is always 4.
+    """
+    try:
+        value = ida_dbg.bpt_t().type
+        if isinstance(value, int) and value > 0:
+            return value
+    except Exception:
+        pass
+    return 4                      # last resort: idd.hpp value in IDA 6.x..9.x
+
+
+_BPT_SOFT = _soft_bpt_type()
+
+
+def _add_code_bpt(ea):
+    """Add a software execution breakpoint (the only working kind here)."""
+    if ida_dbg.exist_bpt(ea):
+        return True
+    return ida_dbg.add_bpt(ea, 0, _BPT_SOFT)
 
 # F9 (while interception is enabled) replays the last explicit action:
 #   "attach" -> attach to the already running target
@@ -725,7 +755,7 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
         except (TypeError, ValueError):
             continue
         if not ida_dbg.exist_bpt(ea):
-            ida_dbg.add_bpt(ea, 1, ida_dbg.BPT_BRK)
+            _add_code_bpt(ea)
         bps.append(ea)
     res["breakpoints"] = bps
 
@@ -1147,7 +1177,7 @@ def rosetta_attach(reason=""):
             ea = None
             _msg("ignoring invalid break_off %r" % off)
         if ea and not ida_dbg.exist_bpt(ea):
-            ok = ida_dbg.add_bpt(ea, 1, ida_dbg.BPT_BRK)
+            ok = _add_code_bpt(ea)
             _msg("breakpoint 0x%x -> %s" % (ea, ok))
 
     _STATE.update(t0=t0, pid=pid, base=db_base)

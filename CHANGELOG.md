@@ -1,6 +1,21 @@
 # Changelog
 
+## 0.6.1
+- **Fix: breakpoints never fired.** `add_bpt(ea, 1, BPT_BRK)` passed the
+  `BPT_BRK` *flag* bit (1) where `add_bpt` expects a `bpttype_t`; the value 1
+  means `BPT_WRITE`, so IDA sent `Z2,addr,1` (a one-byte write watchpoint) and
+  the Rosetta stub rejected it with `E09`. Software execution breakpoints need
+  `add_bpt(ea, 0, BPT_SOFT)`, which IDA sends as `Z0` and the stub accepts.
+  Reported by a live `Z0 -> T05` test at `0x100003c78`.
+- Both call sites (`rosetta_headless(breakpoints=...)` and the stored
+  `break_off` used by `rosetta_attach()`) now go through `_add_code_bpt()`.
+- `BPT_SOFT` is not exported by `ida_dbg`, so it is derived at runtime from
+  `ida_dbg.bpt_t().type` (the constructor initializes it to `BPT_SOFT`) with
+  `4` only as a last-resort fallback.
+- CI/Makefile guard against reintroducing `add_bpt(..., BPT_BRK)`.
+
 ## 0.6.0
+
 - **Headless support**: `rosetta_headless()` (UI-free) plus
   `tools/rosetta_headless.py`, usable from `idat -A -S"..."`. The GUI parts
   (menus, actions, dialogs, F9 hook) are skipped when `is_idaq()` is false.
