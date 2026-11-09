@@ -11,3 +11,4 @@ launcher/noaslr.dSYM
 *.nam
 *.til
 .DS_Store
+.idea/

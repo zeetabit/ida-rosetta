@@ -70,13 +70,13 @@ IDA (arm64)                                   translated x86_64 process
 
 ```bash
 git clone https://github.com/zeetabit/ida-rosetta.git
-ln -s "$PWD/ida-rosetta/plugin/rosetta.py" ~/.idapro/plugins/rosetta.py
+cd ida-rosetta && make install      # symlinks plugin/rosetta.py into ~/.idapro/plugins
 ```
 
 Start IDA. The Output window should show:
 
 ```
-[rosetta] v0.5.0 installed: F9 / Attach to process -> Rosetta attach (port 1239)
+[rosetta] v0.5.0 installed: menu Debugger > Rosetta; F9 interception is OFF (port 1239)
 [rosetta] note: dbg_gdb.cfg lacks the Rosetta register map; run ...
 ```
 
