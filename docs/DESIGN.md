@@ -182,6 +182,22 @@ the 0.x flat layout (`<idb path> -> {...}`) migrate on read.
 | LLDB/Ghidra for execution | works (LLDB spawns the Rosetta stub natively) but loses IDA's debugger |
 | Upstream feature request | the correct long-term fix: IDA's macOS backend should spawn the Rosetta stub for translated processes — it already owns the GDB transport |
 
+### Can IDA use LLDB?
+
+No built-in LLDB backend ships with IDA 9.5: the debugger modules are
+`arm_mac_user`, `gdb_user`, `ios_user`, `xnu_user`, `linux`, … (there is no
+`lldb_user`). The `lldb` strings in `libida` are DWARF/compiler tuning flags
+(`-debugger-tuning=lldb`), and the `dbg_ios.cfg`/`dbg_xnu.cfg` mentions are
+background on Apple's RNBRemote.
+
+IDA can connect to a **GDB RSP server** — which is exactly what this plugin
+does with `/usr/libexec/rosetta/debugserver` — but it cannot drive LLDB as a
+backend. A process has one debugger owner; LLDB and IDA cannot both own it.
+Using LLDB means using LLDB's debugger UI, and losing IDA's database,
+decompiler and scripting. An LLDB-backed IDA plugin would have to implement
+`debugger_t` and delegate to LLDB's SB API; that is a much larger project than
+the RSP bridge and has no Rosetta-specific advantage.
+
 ### What IDA's docs say about custom debuggers
 
 `idd.hpp` is *"Debugger plugin API for debugger module writers"*; `dbg.hpp` is
