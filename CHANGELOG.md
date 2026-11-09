@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+- **Headless support**: `rosetta_headless()` (UI-free) plus
+  `tools/rosetta_headless.py`, usable from `idat -A -S"..."`. The GUI parts
+  (menus, actions, dialogs, F9 hook) are skipped when `is_idaq()` is false.
+- Debugger events are pumped explicitly (`wait_for_next_event`) because there is
+  no GUI event loop; verified `attach_process -> 1` and register reads in
+  text mode.
+- `rosetta_detach()` helper.
+
 ## 0.5.0
 - **F9 replays the last explicit action**: `Pick and start…` makes F9
   start+attach; `Attach to running target` / `Attach by process…` make F9

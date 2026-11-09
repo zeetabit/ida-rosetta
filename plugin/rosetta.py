@@ -41,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 import hashlib
 import json
@@ -564,6 +564,218 @@ def _save_settings(entry):
 
 
 # ------------------------------------------------------------------ target
+
+# ---------------------------------------------------------------- headless
+#
+# UI-free. Usable from `idat -A -S...` (and idalib). There is no GUI event
+# loop, so the debugger must be pumped explicitly with wait_for_next_event().
+
+def _pump_until_suspended(timeout=10.0):
+    """Drive the debugger until it is queryable (suspended)."""
+    deadline = time.time() + max(0.5, float(timeout))
+    events = 0
+    while time.time() < deadline:
+        try:
+            events |= ida_dbg.wait_for_next_event(ida_dbg.WFNE_ANY, 1)
+        except Exception:
+            break
+        if ida_dbg.dbg_can_query():
+            return True, events
+    return ida_dbg.dbg_can_query(), events
+
+
+def _start_headless(path, args=None, env=None, cwd=None, stdin_path=None):
+    """Spawn the target with the launcher (no Terminal); return its pid."""
+    exe = _launcher()
+    if exe is None:
+        _msg("headless start: no launcher available")
+        return None
+    pidfile = os.path.join(DATA_DIR, "headless.pid")
+    try:
+        os.unlink(pidfile)
+    except OSError:
+        pass
+    cmd = [exe, "-p", pidfile, path]
+    if args:
+        try:
+            cmd += shlex.split(args)
+        except ValueError:
+            _msg("headless start: bad arguments %r" % (args,))
+            return None
+    envv = dict(os.environ)
+    toks = _env_tokens(env)
+    if toks is None:
+        _msg("headless start: malformed environment")
+        return None
+    for tok in toks:
+        key, _, val = tok.partition("=")
+        envv[key] = val
+
+    stdin = subprocess.DEVNULL
+    fd = None
+    if stdin_path:
+        try:
+            fd = os.open(stdin_path, os.O_RDWR)   # FIFOs: no blocking open
+            stdin = fd
+        except OSError as exc:
+            _msg("headless start: cannot open stdin %s: %r" % (stdin_path, exc))
+            return None
+
+    try:
+        subprocess.Popen(cmd, cwd=(cwd or None), env=envv, stdin=stdin,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except Exception as exc:
+        _msg("headless start failed: %r" % (exc,))
+        return None
+
+    deadline = time.time() + 8.0
+    while time.time() < deadline:
+        try:
+            with open(pidfile) as f:
+                return int(f.read().strip())
+        except Exception:
+            time.sleep(0.05)
+    return None
+
+
+def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
+                     start=False, stdin_path=None, breakpoints=(),
+                     run=False, wait_timeout=0.0, registers=()):
+    """Attach (or start + attach) without any UI. Returns a dict."""
+    res = {"ok": False, "image_base": idaapi.get_imagebase()}
+
+    if ida_dbg.is_debugger_on():
+        ok, events = _pump_until_suspended(5.0)
+        res.update(ok=True, already_attached=True, suspended=ok,
+                   events=events, state=ida_dbg.get_process_state())
+        return res
+
+    if not _cfg_ok():
+        res["error"] = ("dbg_gdb.cfg lacks com.apple.debugserver.x86_64; run "
+                        "ida_kernwin.rosetta_install_cfg() and restart IDA")
+        return res
+
+    if pid is None:
+        path = path or _target_path()
+        if not path:
+            res["error"] = "no target selected"
+            return res
+        if start:
+            pid = _start_headless(path, args=args, env=env, cwd=cwd,
+                                  stdin_path=stdin_path)
+            if pid is None:
+                res["error"] = "could not start the target"
+                return res
+            res["started"] = True
+        else:
+            pid = _find_process(path)[0]
+            if pid is None:
+                res["error"] = ("%s is not running (start=True or launch it "
+                                "with the noaslr launcher)" % path)
+                return res
+    else:
+        path, _base = _pid_exe(pid)
+        if path is None:
+            res["error"] = "cannot resolve the executable of pid %d" % pid
+            return res
+
+    res.update(path=path, pid=pid)
+    if not _is_x86_64(path):
+        res["error"] = "%s has no x86_64 slice" % path
+        return res
+
+    _pid, vminfo = _find_process(path)
+    base = _image_base(vminfo, os.path.basename(path)) if vminfo else None
+    if base is None:
+        res["error"] = "could not determine the runtime image base"
+        return res
+    db_base = idaapi.get_imagebase()
+    res["runtime_base"] = base
+    if base != db_base:
+        res["error"] = ("image base mismatch: process 0x%x, database 0x%x "
+                        "(ASLR?)" % (base, db_base))
+        return res
+
+    if not _ensure_stub():
+        res["error"] = "could not start the Rosetta debugserver"
+        return res
+
+    ida_dbg.set_remote_debugger("127.0.0.1", "", PORT)
+    if not ida_dbg.load_debugger("gdb", True):
+        res["error"] = "could not load the Remote GDB backend"
+        return res
+
+    rc = ida_dbg.attach_process(pid, -1)
+    res["attach"] = rc
+    if rc != 1:
+        res["error"] = "attach_process returned %s" % rc
+        return res
+
+    ok, events = _pump_until_suspended(10.0)
+    res.update(suspended=ok, events=events)
+    if not ok:
+        res["error"] = "debugger never became queryable"
+        return res
+
+    bps = []
+    for ea in breakpoints:
+        try:
+            ea = int(ea, 0) if isinstance(ea, str) else int(ea)
+        except (TypeError, ValueError):
+            continue
+        if not ida_dbg.exist_bpt(ea):
+            ida_dbg.add_bpt(ea, 1, ida_dbg.BPT_BRK)
+        bps.append(ea)
+    res["breakpoints"] = bps
+
+    try:
+        res["rip"] = ida_dbg.get_reg_val("rip")
+    except Exception:
+        pass
+
+    if run:
+        ida_dbg.continue_process()
+        res["state"] = ida_dbg.get_process_state()
+
+    if wait_timeout and float(wait_timeout) > 0:
+        deadline = time.time() + float(wait_timeout)
+        while time.time() < deadline:
+            ev = ida_dbg.wait_for_next_event(ida_dbg.WFNE_ANY, 1)
+            res["stop_event"] = ev
+            if ida_dbg.dbg_can_query():
+                break
+        res["suspended"] = ida_dbg.dbg_can_query()
+        res["stop"] = res["suspended"]
+        if res["suspended"]:
+            try:
+                res["rip"] = ida_dbg.get_reg_val("rip")
+            except Exception:
+                pass
+
+    if registers and res.get("suspended"):
+        vals = {}
+        for name in registers:
+            try:
+                vals[name] = ida_dbg.get_reg_val(name)
+            except Exception:
+                vals[name] = None
+        res["registers"] = vals
+
+    try:
+        res["state"] = ida_dbg.get_process_state()
+    except Exception:
+        pass
+    res["ok"] = True
+    return res
+
+
+def rosetta_detach():
+    if ida_dbg.is_debugger_on():
+        ida_dbg.detach_process()
+        return True
+    return False
+
 
 def _target_path():
     entry = _settings()
@@ -1125,6 +1337,12 @@ class RosettaPlugin(idaapi.plugin_t):
 
 
 def install():
+    gui = True
+    try:
+        gui = bool(ida_kernwin.is_idaq())
+    except Exception:
+        pass
+
     for attr in ("_rosetta_ui_hook", "_rosetta_dbg_hook"):
         old = getattr(ida_kernwin, attr, None)
         if old is not None:
@@ -1134,11 +1352,12 @@ def install():
                 pass
             setattr(ida_kernwin, attr, None)
 
-    ui = _UiHooks()
-    if ui.hook():
-        ida_kernwin._rosetta_ui_hook = ui
-    else:
-        _msg("could not install the UI hook")
+    if gui:
+        ui = _UiHooks()
+        if ui.hook():
+            ida_kernwin._rosetta_ui_hook = ui
+        else:
+            _msg("could not install the UI hook")
 
     dbg = _DbgHooks()
     if dbg.hook():
@@ -1146,7 +1365,8 @@ def install():
     else:
         _msg("could not install the debugger hook")
 
-    _install_actions()
+    if gui:
+        _install_actions()
 
     ida_kernwin.rosetta_attach = rosetta_attach
     ida_kernwin.rosetta_pick = _pick_target
@@ -1159,10 +1379,16 @@ def install():
     ida_kernwin.rosetta_attach_pid = rosetta_attach_pid
     ida_kernwin.rosetta_toggle_intercept = rosetta_toggle_intercept
     ida_kernwin.rosetta_set_f9_mode = _set_last_mode
+    ida_kernwin.rosetta_headless = rosetta_headless
+    ida_kernwin.rosetta_detach = rosetta_detach
 
-    _msg("v%s installed: menu Debugger > Rosetta; F9 interception is %s "
-         "(port %d)" % (__version__,
-                        "ON" if _intercept_enabled() else "OFF", PORT))
+    if gui:
+        _msg("v%s installed: menu Debugger > Rosetta; F9 interception is %s "
+             "(port %d)" % (__version__,
+                            "ON" if _intercept_enabled() else "OFF", PORT))
+    else:
+        _msg("v%s installed (headless): call rosetta_headless()" % __version__)
+
     if not _cfg_ok():
         _msg("note: dbg_gdb.cfg lacks the Rosetta register map; run "
              "ida_kernwin.rosetta_install_cfg() and restart IDA")

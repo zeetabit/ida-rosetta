@@ -10,7 +10,7 @@ all: check launcher
 
 check:
 	$(PY) -m py_compile \
-		plugin/rosetta.py tools/ida_gdb_cfg.py \
+		plugin/rosetta.py tools/ida_gdb_cfg.py tools/rosetta_headless.py \
 		tests/rsp_probe.py examples/fallingwhale_helper.py
 
 launcher:

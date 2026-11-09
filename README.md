@@ -193,6 +193,7 @@ $IDAUSR/cfg/dbg_gdb.cfg                       patched copy (config override)
 
 ## Documentation
 
+* [docs/HEADLESS.md](docs/HEADLESS.md) — running under `idat -A -S…`
 * [docs/USAGE.md](docs/USAGE.md) — every menu entry, both workflows, F9
   semantics, settings reference, console helpers
 * [docs/DESIGN.md](docs/DESIGN.md) — why this is an attach helper, the measured
