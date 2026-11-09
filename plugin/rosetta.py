@@ -41,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 import hashlib
 import json
@@ -212,6 +212,8 @@ int main(int argc, char **argv) {
 
 _STATE = {"t0": 0.0, "pid": 0, "base": 0, "notified_off": False,
           "on_bpt": None, "on_bpt_eas": set()}
+_VMMAP_CACHE = {}
+_VMMAP_TTL = 2.0
 _CFG_OK = None
 
 
@@ -875,12 +877,17 @@ def _start_headless(path, args=None, env=None, cwd=None, stdin_path=None):
 
 def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
                      start=False, stdin_path=None, breakpoints=(),
-                     run=False, wait_timeout=0.0, registers=(), on_bpt=None):
+                     run=False, wait_timeout=0.0, registers=(), on_bpt=None,
+                     base=None):
     """Attach (or start + attach) without any UI. Returns a dict.
 
     breakpoints accepts absolute addresses, "+0x..." / "rva:0x..." offsets,
     IDA names, or "<exe>+0x..." specs. on_bpt is called as on_bpt(ctx) on a
     hit; return "continue" to resume automatically (see rosetta_on_bpt).
+
+    base overrides the runtime image base. Pass it only when you know the
+    target was started without ASLR (e.g. by the bundled launcher); it skips
+    the expensive vmmap query, which matters inside IDA Assist scripts.
     """
     res = {"ok": False, "image_base": idaapi.get_imagebase()}
     gui = bool(ida_kernwin.is_idaq())
@@ -903,6 +910,7 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
                         "ida_kernwin.rosetta_install_cfg() and restart IDA")
         return res
 
+    base = None
     if pid is None:
         path = path or _target_path()
         if not path:
@@ -922,7 +930,13 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
                                 "with the noaslr launcher)" % path)
                 return res
     else:
-        path, _base = _pid_exe(pid)
+        if base is None:
+            path, base = _pid_exe(pid)
+        else:
+            path = _pid_path(pid)
+            if path is None:
+                path, _ = _pid_exe(pid)
+            base = int(base, 0) if isinstance(base, str) else int(base)
         if path is None:
             res["error"] = "cannot resolve the executable of pid %d" % pid
             return res
@@ -932,8 +946,9 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
         res["error"] = "%s has no x86_64 slice" % path
         return res
 
-    _pid, vminfo = _find_process(path)
-    base = _image_base(vminfo, os.path.basename(path)) if vminfo else None
+    if base is None:
+        _pid, vminfo = _find_process(path)
+        base = _image_base(vminfo, os.path.basename(path)) if vminfo else None
     if base is None:
         res["error"] = "could not determine the runtime image base"
         return res
@@ -1068,6 +1083,13 @@ def _pick_target():
     _save_settings(entry)
     _msg("target: %s (x86_64=%s)" % (path, _is_x86_64(path)))
     return path
+
+
+def _pid_path(pid):
+    """Executable path via ps (cheap; no vmmap)."""
+    r = _run(["ps", "-o", "comm=", "-p", str(pid)], timeout=5)
+    line = ((r.stdout if r else "") or "").strip()
+    return line or None
 
 
 def _pid_exe(pid):
@@ -1237,8 +1259,17 @@ def _should_intercept():
 # ----------------------------------------------------------------- process
 
 def _vmmap(pid):
+    # vmmap costs ~1.5s; the same PID is queried by _pid_exe() and
+    # _find_process() in one attach, and Assist scripts have a short budget.
+    now = time.time()
+    hit = _VMMAP_CACHE.get(pid)
+    if hit and now - hit[0] <= _VMMAP_TTL:
+        return hit[1]
     r = _run(["vmmap", str(pid)])
-    return (r.stdout if r else "") or ""
+    info = (r.stdout if r else "") or ""
+    if info:
+        _VMMAP_CACHE[pid] = (now, info)
+    return info
 
 
 def _image_base(vminfo, name):

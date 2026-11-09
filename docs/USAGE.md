@@ -311,6 +311,21 @@ ida_kernwin.rosetta_attach()      # resumes after IDA registers the session
 Both paths are equivalent; `rosetta_headless()` detects the GUI and uses the
 pre-attach + deferred-resume path automatically.
 
+### Two-stage policy (fragile input)
+
+When attaching disturbs the target's `scanf`/`read`, do not trust the prompts:
+break **before** the logic (entry) to inject known buffers, and **at** the
+decision point to inspect or patch. Dispatch on `ctx.ea` in one callback:
+
+```python
+def on_bpt(ctx):
+    if ctx.ea == ENTRY:      ctx.write(ctx.reg("rdi"), b"user\0"); return "continue"
+    if ctx.ea == COMPARE:    ctx.write(ctx.reg("rdx"), expected);    return "continue"
+    return "stop"
+```
+
+`examples/fallingwhale_helper.py` implements exactly this pattern.
+
 `ctx` provides `ea`, `tid`, `reg(name)`, `regs(names=None)`, `read(ea, size)`,
 `read_str(ea, maxlen)`, `write(ea, data)`, `continue_now()`, `stop()`.
 The same helpers are on `ida_kernwin` (`rosetta_reg`, `rosetta_regs`,

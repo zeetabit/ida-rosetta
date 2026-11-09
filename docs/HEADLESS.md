@@ -61,7 +61,7 @@ From any IDAPython context (headless or GUI):
 ida_kernwin.rosetta_headless(path="/path/prog", pid=None, start=False,
                              breakpoints=["compare_code", "+0x3c78"], run=True,
                              wait_timeout=20, registers=["rdi", "rsi"],
-                             on_bpt=on_bpt)
+                             on_bpt=on_bpt, base=None)
 ```
 
 Returns the same dict as the driver. `ida_kernwin.rosetta_detach()` closes the
@@ -73,6 +73,11 @@ resume automatically; anything else leaves the process stopped. `ctx` exposes
 `continue_now()` and `stop()`. While `rosetta_headless(..., wait_timeout=…)`
 pumps events, auto-continues are handled and the loop keeps waiting for a real
 stop.
+
+`base=0x100000000` skips the `vmmap` probe when the target was started without
+ASLR (the bundled launcher guarantees this). Combined with `pid=`, it keeps an
+attach below IDA Assist's short cooperative script budget; without it, the
+normal GUI path still verifies the runtime base with `vmmap`.
 
 Generic target template: [`examples/generic_helper.py`](../examples/generic_helper.py).
 

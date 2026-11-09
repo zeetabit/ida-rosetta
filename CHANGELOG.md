@@ -1,6 +1,18 @@
 # Changelog
 
+## 0.7.1
+- **Assist-script fast path.** `rosetta_headless(..., base=0x...)` skips the
+  ~1.5 s `vmmap` query when the runtime base is known (no-ASLR launcher).
+  `_pid_path()` resolves the executable with `ps`, and `vmmap` results are
+  cached for 2 s. This keeps one attach under IDA Assist's short cooperative
+  script budget; the normal GUI path still verifies the base with `vmmap`.
+- `examples/fallingwhale_helper.py` is now a **two-stage on-hit policy**:
+  inject known inputs at `make_and_check` entry, then solve at `compare_code`
+  entry. It works even when attaching disturbs the target's `scanf`.
+- Troubleshooting note for Assist/vmmap timeouts.
+
 ## 0.7.0
+
 - **Generic target API**, so a target no longer needs a bespoke helper:
   - `rosetta_headless(..., breakpoints=[...], on_bpt=fn)` accepts symbolic
     breakpoints: absolute, `"+0x3c78"` / `"rva:0x3c78"` (image-relative), IDA
