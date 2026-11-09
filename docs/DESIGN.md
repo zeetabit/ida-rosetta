@@ -192,6 +192,29 @@ A module can declare `DBG_FLAG_DISABLE_ASLR`, which makes IDA show *Disable
 ASLR* in its own debugger options. There is no config- or script-level way to
 add an entry.
 
+### Native `HT_IDD` listener spike (result)
+
+A throwaway probe plugin (not shipped) hooked `HT_IDD` and logged every
+notification while the built-in gdb backend was the active debugger:
+
+* a plugin that is **not** the active debugger module receives the whole event
+  stream: `ev_init_debugger`, `ev_start_process` (with path/args/dir/flags),
+  `ev_attach_process` (with pid), `ev_get_debug_event`, `ev_resume`,
+  `ev_exit_process`, `ev_term_debugger`, …;
+* returning `1` for `ev_start_process`/`ev_attach_process` **suppresses** the
+  gdb backend's own handling (verified: with a claim on `ev_attach_process`,
+  gdb never saw it; with a claim on `ev_start_process`, the vFile prompt
+  disappeared). Nothing else performs the operation, so IDA then spins on
+  `ev_get_debug_event` — a takeover listener must implement the launch/attach
+  itself.
+
+Implication: the F9 override could be moved from
+`ida_kernwin.UI_Hooks.preprocess_action` down to the debugger notification
+layer. It is still **not** a debugger-list entry (that requires a full
+`debugger_t` module, see §6), and it would be a C++ port of the existing glue
+with a binary per IDA version. The Python plugin stays the cheaper option;
+this note exists so a future native rewrite starts from facts.
+
 ## References
 
 * Apple, *About the Rosetta translation environment* — `sysctl.proc_translated`.
