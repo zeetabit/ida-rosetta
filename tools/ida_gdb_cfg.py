@@ -49,7 +49,7 @@ def has_map(path):
 def insert_map(text):
     lines = text.splitlines(True)
     for i, line in enumerate(lines):
-        if line.strip() == '"i386:x86-64"':
+        if line.strip().rstrip(":").strip() == '"i386:x86-64"':
             for j in range(i + 1, min(i + 4, len(lines))):
                 if lines[j].strip().startswith("{"):
                     return "".join(lines[:j + 1] + [FEATURE_BLOCK] + lines[j + 1:])

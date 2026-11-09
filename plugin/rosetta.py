@@ -392,7 +392,7 @@ _FEATURE_BLOCK = '''    "com.apple.debugserver.x86_64":
 def _insert_feature_map(text):
     lines = text.splitlines(True)
     for i, line in enumerate(lines):
-        if line.strip() == '"i386:x86-64"':
+        if line.strip().rstrip(":").strip() == '"i386:x86-64"':
             for j in range(i + 1, min(i + 4, len(lines))):
                 if lines[j].strip().startswith("{"):
                     return "".join(lines[:j + 1] + [_FEATURE_BLOCK] + lines[j + 1:])
