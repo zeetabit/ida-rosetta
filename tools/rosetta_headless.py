@@ -45,7 +45,9 @@ def parse_args(argv):
     ap.add_argument("--cwd", default=None)
     ap.add_argument("--env", default=None)
     ap.add_argument("--stdin", dest="stdin_path", default=None)
-    ap.add_argument("--bp", action="append", default=[])
+    ap.add_argument("--bp", action="append", default=[],
+                    help="breakpoint spec: 0x..., +0x..., rva:0x..., NAME, "
+                         "App+0x... (repeatable)")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--wait", type=float, default=0.0)
     ap.add_argument("--regs", default="")

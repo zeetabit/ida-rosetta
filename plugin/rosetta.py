@@ -41,7 +41,7 @@
 #   * clang (Xcode command line tools) for the launcher; only on first use
 #     and whenever the plugin version / embedded source changes.
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 import hashlib
 import json
@@ -57,6 +57,8 @@ import time
 import idaapi
 import ida_kernwin
 import ida_dbg
+import ida_idd
+import ida_name
 
 try:
     import ida_diskio
@@ -208,7 +210,8 @@ int main(int argc, char **argv) {
 }
 '''
 
-_STATE = {"t0": 0.0, "pid": 0, "base": 0, "notified_off": False}
+_STATE = {"t0": 0.0, "pid": 0, "base": 0, "notified_off": False,
+          "on_bpt": None, "on_bpt_eas": set()}
 _CFG_OK = None
 
 
@@ -598,6 +601,204 @@ def _save_settings(entry):
 
 # ------------------------------------------------------------------ target
 
+# ------------------------------------------------------------- generic API
+#
+# Target scripts should depend on this surface only. It is deliberately small
+# and app-independent: symbolic breakpoints + an on-hit callback context +
+# register/memory accessors. The *policy* (which address matters, what to write
+# there) belongs in the target script.
+#
+# Example:
+#
+#   def on_bpt(ctx):
+#       expected = ctx.read_str(ctx.reg("rdi"))
+#       ctx.write(ctx.reg("rdx"), expected[:ctx.reg("rsi")].encode())
+#       return "continue"
+#
+#   ida_kernwin.rosetta_headless(path=p, breakpoints=["main", "+0x3c78"],
+#                                on_bpt=on_bpt, run=True, wait_timeout=30)
+
+_X86_64_REGS = ("rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+                "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+                "rip", "eflags")
+
+
+def _resolve_bpt(spec):
+    """Resolve a breakpoint specification to an address.
+
+    Accepted forms:
+        0x100003c78 / 4294982776    absolute
+        "+0x3c78" or "rva:0x3c78"   relative to the database image base
+        "main" / "compare_code"     IDA name (user names included)
+        "FallingWhale+0x3c78"       executable basename/stem + relative offset
+    """
+    if isinstance(spec, int):
+        return spec
+    text = str(spec).strip()
+    if not text:
+        raise ValueError("empty breakpoint")
+    base = idaapi.get_imagebase()
+    low = text.lower()
+    if low.startswith("rva:"):
+        return base + int(text[4:], 0)
+    if text.startswith("+"):
+        return base + int(text[1:], 0)
+    if "+" in text:
+        module, _sep, offset = text.rpartition("+")
+        exe = os.path.basename(idaapi.get_input_file_path())
+        stem = os.path.splitext(exe)[0]
+        if module in (exe, stem):
+            return base + int(offset, 0)
+    ea = ida_name.get_name_ea(idaapi.BADADDR, text)
+    if ea != idaapi.BADADDR:
+        return ea
+    return int(text, 0)
+
+
+def _install_bpts(specs):
+    """Resolve and add breakpoints; return the effective addresses."""
+    bps = []
+    for spec in specs:
+        try:
+            ea = _resolve_bpt(spec)
+        except (TypeError, ValueError):
+            _msg("ignoring breakpoint %r" % (spec,))
+            continue
+        if not ida_dbg.exist_bpt(ea):
+            _add_code_bpt(ea)
+        bps.append(ea)
+    return bps
+
+
+def rosetta_reg(name):
+    """Read one register of the suspended process."""
+    return ida_dbg.get_reg_val(name)
+
+
+def rosetta_regs(names=None):
+    """Read several registers (default: the x86_64 general set)."""
+    out = {}
+    for name in (names or _X86_64_REGS):
+        try:
+            out[name] = ida_dbg.get_reg_val(name)
+        except Exception:
+            out[name] = None
+    return out
+
+
+def rosetta_read(ea, size):
+    """Read the debuggee's memory (bytes). Empty on failure."""
+    try:
+        data = ida_idd.dbg_read_memory(int(ea), int(size))
+    except Exception:
+        data = None
+    return bytes(data) if data else b""
+
+
+def rosetta_read_str(ea, maxlen=256):
+    """Read a NUL-terminated string (latin-1 decoded)."""
+    raw = rosetta_read(ea, maxlen)
+    return raw.split(b"\0")[0].decode("latin1", "replace")
+
+
+def rosetta_write(ea, data):
+    """Write bytes (or a str, encoded utf-8) to the debuggee."""
+    if isinstance(data, str):
+        data = data.encode()
+    try:
+        return bool(ida_idd.dbg_write_memory(int(ea), bytes(data)))
+    except Exception:
+        return False
+
+
+class _BptContext:
+    """Context passed to an on_bpt callback."""
+
+    def __init__(self, ea, tid=-1):
+        self.ea = int(ea)
+        self.tid = tid
+
+    def reg(self, name):
+        return rosetta_reg(name)
+
+    def regs(self, names=None):
+        return rosetta_regs(names)
+
+    def read(self, ea, size):
+        return rosetta_read(ea, size)
+
+    def read_str(self, ea, maxlen=256):
+        return rosetta_read_str(ea, maxlen)
+
+    def write(self, ea, data):
+        return rosetta_write(ea, data)
+
+    def continue_now(self):
+        return ida_dbg.continue_process()
+
+    def stop(self):
+        return "stop"
+
+
+def rosetta_add_bpt(spec):
+    """Resolve and add one software execution breakpoint; return its EA.
+
+    Safe to call before attaching: the breakpoint is stored and installed when
+    the debugger session starts. This is the GUI-friendly path.
+    """
+    ea = _resolve_bpt(spec)
+    if not ida_dbg.exist_bpt(ea):
+        _add_code_bpt(ea)
+    return ea
+
+
+def rosetta_on_bpt(fn, eas=None):
+    """Run fn(ctx) on a breakpoint hit.
+
+    Return "continue" (or True) from fn to resume automatically; anything else
+    leaves the process suspended. If `eas` is given, only those addresses call
+    fn; otherwise every breakpoint the plugin added is eligible.
+    """
+    _STATE["on_bpt"] = fn
+    _STATE["on_bpt_eas"] = set(int(e) for e in eas) if eas else set()
+    return True
+
+
+def rosetta_off_bpt():
+    """Remove the on-hit callback."""
+    _STATE["on_bpt"] = None
+    _STATE["on_bpt_eas"] = set()
+
+
+def _dispatch_bpt(ea, tid=-1):
+    """Internal: pass a stop to the user callback; return 'continue'/'stop'."""
+    fn = _STATE.get("on_bpt")
+    if fn is None:
+        return None
+    eas = _STATE.get("on_bpt_eas") or set()
+    if eas:
+        if int(ea) not in eas:
+            return None
+    else:
+        # No explicit scope: only user-visible breakpoints, never IDA's
+        # internal step-over breakpoints.
+        try:
+            bpt = ida_dbg.bpt_t()
+            if not ida_dbg.get_bpt(ea, bpt) or not bpt.listbpt():
+                return None
+        except Exception:
+            return None
+    try:
+        action = fn(_BptContext(ea, tid))
+    except Exception as exc:
+        _msg("on_bpt(0x%x) failed: %r" % (ea, exc))
+        return "error"
+    if action in (True, "continue", "go", "run"):
+        ida_dbg.continue_process()
+        return "continue"
+    return "stop"
+
+
 # ---------------------------------------------------------------- headless
 #
 # UI-free. Usable from `idat -A -S...` (and idalib). There is no GUI event
@@ -674,14 +875,27 @@ def _start_headless(path, args=None, env=None, cwd=None, stdin_path=None):
 
 def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
                      start=False, stdin_path=None, breakpoints=(),
-                     run=False, wait_timeout=0.0, registers=()):
-    """Attach (or start + attach) without any UI. Returns a dict."""
+                     run=False, wait_timeout=0.0, registers=(), on_bpt=None):
+    """Attach (or start + attach) without any UI. Returns a dict.
+
+    breakpoints accepts absolute addresses, "+0x..." / "rva:0x..." offsets,
+    IDA names, or "<exe>+0x..." specs. on_bpt is called as on_bpt(ctx) on a
+    hit; return "continue" to resume automatically (see rosetta_on_bpt).
+    """
     res = {"ok": False, "image_base": idaapi.get_imagebase()}
+    gui = bool(ida_kernwin.is_idaq())
 
     if ida_dbg.is_debugger_on():
-        ok, events = _pump_until_suspended(5.0)
+        if gui:
+            ok, events = bool(ida_dbg.dbg_can_query()), 0
+        else:
+            ok, events = _pump_until_suspended(5.0)
+        bps = _install_bpts(breakpoints)
+        if on_bpt is not None:
+            rosetta_on_bpt(on_bpt, bps)
         res.update(ok=True, already_attached=True, suspended=ok,
-                   events=events, state=ida_dbg.get_process_state())
+                   events=events, breakpoints=bps,
+                   state=ida_dbg.get_process_state())
         return res
 
     if not _cfg_ok():
@@ -739,10 +953,31 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
         res["error"] = "could not load the Remote GDB backend"
         return res
 
+    # In the GUI, add breakpoints before the attach and let IDA install them;
+    # pumping events from a script call can park the GDB backend in poll().
+    if gui:
+        bps = _install_bpts(breakpoints)
+        if on_bpt is not None:
+            rosetta_on_bpt(on_bpt, bps)
+
     rc = ida_dbg.attach_process(pid, -1)
     res["attach"] = rc
     if rc != 1:
         res["error"] = "attach_process returned %s" % rc
+        return res
+
+    if gui:
+        res.update(suspended=False, breakpoints=bps)
+        if run:
+            if ida_dbg.is_debugger_on():
+                ida_dbg.continue_process()
+            else:
+                _schedule_resume()
+        try:
+            res["state"] = ida_dbg.get_process_state()
+        except Exception:
+            pass
+        res["ok"] = True
         return res
 
     ok, events = _pump_until_suspended(10.0)
@@ -751,15 +986,9 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
         res["error"] = "debugger never became queryable"
         return res
 
-    bps = []
-    for ea in breakpoints:
-        try:
-            ea = int(ea, 0) if isinstance(ea, str) else int(ea)
-        except (TypeError, ValueError):
-            continue
-        if not ida_dbg.exist_bpt(ea):
-            _add_code_bpt(ea)
-        bps.append(ea)
+    bps = _install_bpts(breakpoints)
+    if on_bpt is not None:
+        rosetta_on_bpt(on_bpt, bps)
     res["breakpoints"] = bps
 
     try:
@@ -769,6 +998,7 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
 
     if run:
         ida_dbg.continue_process()
+        res["suspended"] = False
         res["state"] = ida_dbg.get_process_state()
 
     if wait_timeout and float(wait_timeout) > 0:
@@ -776,6 +1006,8 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
         while time.time() < deadline:
             ev = ida_dbg.wait_for_next_event(ida_dbg.WFNE_ANY, 1)
             res["stop_event"] = ev
+            if not ida_dbg.is_debugger_on():
+                break
             if ida_dbg.dbg_can_query():
                 break
         res["suspended"] = ida_dbg.dbg_can_query()
@@ -786,7 +1018,7 @@ def rosetta_headless(path=None, pid=None, args=None, env=None, cwd=None,
             except Exception:
                 pass
 
-    if registers and res.get("suspended"):
+    if registers and res.get("suspended") and ida_dbg.dbg_can_query():
         vals = {}
         for name in registers:
             try:
@@ -1095,6 +1327,24 @@ def _start_target(path, args=None, env=None, cwd=None):
     return None
 
 
+def _resume_after_attach():
+    """Timer callback: resume once IDA has registered the attached session."""
+    try:
+        if ida_dbg.is_debugger_on() and ida_dbg.get_process_state() < 0:
+            ida_dbg.continue_process()
+    except Exception as exc:
+        _msg("deferred resume failed: %r" % (exc,))
+    return -1                       # one-shot
+
+
+def _schedule_resume(delay_ms=300):
+    """Run _resume_after_attach outside the current script/handler."""
+    try:
+        ida_kernwin.register_timer(int(delay_ms), _resume_after_attach)
+    except Exception as exc:
+        _msg("could not schedule resume: %r" % (exc,))
+
+
 def rosetta_attach_action():
     """Menu action: attach to the running target and make that F9's default."""
     _set_last_mode("attach")
@@ -1188,6 +1438,10 @@ def rosetta_attach(reason=""):
     # Direct attach. request_attach_process() only queues a request that IDA
     # services while a session already exists; from an action handler it would
     # never run. attach_process() performs the RSP handshake itself.
+    #
+    # continue_process() immediately after attach is usually a no-op: IDA has
+    # not registered the session yet (is_debugger_on() is still False). Queue
+    # the resume through the UI request list, which runs after this handler.
     rc = ida_dbg.attach_process(pid, -1)
     _msg("attach_process(pid=%d) -> %s after %.2fs" % (pid, rc, time.time() - t0))
     if rc != 1:
@@ -1200,8 +1454,11 @@ def rosetta_attach(reason=""):
         ida_kernwin.jumpto(ida_dbg.get_reg_val("rip") or db_base)
     except Exception:
         pass
-    ida_dbg.continue_process()
-    _msg("running (total %.2fs); breakpoints come from the database"
+    if ida_dbg.is_debugger_on():
+        ida_dbg.continue_process()
+    else:
+        _schedule_resume()
+    _msg("attached (total %.2fs); breakpoints come from the database"
          % (time.time() - t0))
     return True
 
@@ -1264,6 +1521,11 @@ class _DbgHooks(ida_dbg.DBG_Hooks):
     def dbg_process_attach(self, pid, tid, ea, name, base, size):
         _msg("attach notification: pid=%d base=0x%x (t=%.2fs)"
              % (pid, base, time.time() - _STATE["t0"]))
+
+    def dbg_bpt(self, tid, bptea):
+        # 0 = never show IDA's exception-warning dialog for user breakpoints.
+        _dispatch_bpt(bptea, tid)
+        return 0
 
     def dbg_process_exit(self, pid, tid, ea, exit_code):
         _msg("process exited (code=%d)" % exit_code)
@@ -1414,6 +1676,14 @@ def install():
     ida_kernwin.rosetta_set_f9_mode = _set_last_mode
     ida_kernwin.rosetta_headless = rosetta_headless
     ida_kernwin.rosetta_detach = rosetta_detach
+    ida_kernwin.rosetta_reg = rosetta_reg
+    ida_kernwin.rosetta_regs = rosetta_regs
+    ida_kernwin.rosetta_read = rosetta_read
+    ida_kernwin.rosetta_read_str = rosetta_read_str
+    ida_kernwin.rosetta_write = rosetta_write
+    ida_kernwin.rosetta_add_bpt = rosetta_add_bpt
+    ida_kernwin.rosetta_on_bpt = rosetta_on_bpt
+    ida_kernwin.rosetta_off_bpt = rosetta_off_bpt
 
     if gui:
         _msg("v%s installed: menu Debugger > Rosetta; F9 interception is %s "

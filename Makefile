@@ -11,7 +11,8 @@ all: check launcher
 check:
 	$(PY) -m py_compile \
 		plugin/rosetta.py tools/ida_gdb_cfg.py tools/rosetta_headless.py \
-		tests/rsp_probe.py examples/fallingwhale_helper.py
+		tests/rsp_probe.py examples/fallingwhale_helper.py \
+		examples/generic_helper.py
 	@if grep -RnE '^[^#]*add_bpt\(.*BPT_BRK' plugin tools examples tests 2>/dev/null; then \
 		echo "error: add_bpt() type argument must be BPT_SOFT (4), not BPT_BRK (1 = BPT_WRITE)"; \
 		exit 1; \

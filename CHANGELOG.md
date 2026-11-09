@@ -1,6 +1,36 @@
 # Changelog
 
+## 0.7.0
+- **Generic target API**, so a target no longer needs a bespoke helper:
+  - `rosetta_headless(..., breakpoints=[...], on_bpt=fn)` accepts symbolic
+    breakpoints: absolute, `"+0x3c78"` / `"rva:0x3c78"` (image-relative), IDA
+    names (`"main"`, `"compare_code"`), and `"AppName+0x3c78"`.
+  - `on_bpt(ctx)` runs on a hit; return `"continue"` to resume automatically.
+    `ctx` exposes `ea`, `tid`, `reg()`, `regs()`, `read()`, `read_str()`,
+    `write()`, `continue_now()`, `stop()`.
+  - `rosetta_reg()`, `rosetta_regs()`, `rosetta_read()`, `rosetta_read_str()`,
+    `rosetta_write()`, `rosetta_on_bpt()`, `rosetta_off_bpt()`.
+  - `DBG_Hooks.dbg_bpt` dispatch installed with the plugin; works in GUI and
+    headless (the wait loop keeps pumping across auto-continues).
+- `examples/generic_helper.py`: documented template for any Intel app.
+  `examples/fallingwhale_helper.py` is now a thin, explicitly app-specific
+  policy using that API.
+- **GUI attach now actually resumes.** `continue_process()` immediately after
+  `attach_process()` is a no-op because IDA has not registered the session yet
+  (`is_debugger_on()` is still false). `rosetta_attach()` schedules a one-shot
+  timer that resumes once the session exists. A UI request is not enough: it
+  can run inline and block inside the GDB backend.
+- **`rosetta_headless()` is GUI-safe.** When `is_idaq()` is true it installs
+  breakpoints before attaching and defers the resume, instead of calling
+  `wait_for_next_event()` from an IDAPython script. `idat` keeps the explicit
+  pump (there is no event loop there).
+- **No register reads while running.** `run=True` clears `suspended`, and the
+  optional register dump is gated by `dbg_can_query()`. Reading registers from
+  a script while the target runs made the GDB backend wait in `poll()`.
+- `rosetta_add_bpt(spec)` added for the GUI-friendly pre-attach path.
+
 ## 0.6.1
+
 - **Fix: breakpoints never fired.** `add_bpt(ea, 1, BPT_BRK)` passed the
   `BPT_BRK` *flag* bit (1) where `add_bpt` expects a `bpttype_t`; the value 1
   means `BPT_WRITE`, so IDA sent `Z2,addr,1` (a one-byte write watchpoint) and

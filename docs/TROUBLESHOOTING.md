@@ -11,6 +11,9 @@ target's runtime base.
 | F9 does nothing | target not selected, or not an x86_64 binary, or a debugger is already active | `ida_kernwin.rosetta_pick()`; check `target x86_64` in the doctor output |
 | F9 returns instantly with no attach | `ProcessStart` action not intercepted (name changed / plugin not installed) | check the Output for `[rosetta] vX installed`; see COMPATIBILITY.md |
 | `attach failed (-1)` | stub busy (`--attach`), process gone, or security software blocking | kill stale `rosetta/debugserver`, retry; add an exclusion |
+| attach succeeds but the process sits at the attach stop | `continue_process()` was called before IDA registered the session (a no-op) | upgrade to 0.7.0+; `rosetta_attach()` resumes from a one-shot timer |
+| IDA freezes in `gdb_user`/`poll` after an attach | a script read registers or pumped events while the target was running | upgrade to 0.7.0+; do not call `get_reg_val()`/`wait_for_next_event()` on a running process |
+| attach takes 2-5 s on a tiny binary | normal: Rosetta stub handshake + IDA's memory-region probing; app size is irrelevant | wait, or measure with `tests/rsp_probe.py` |
 | attach works but no breakpoint hits | target started with ASLR (addresses don't match); or plugin < 0.6.1, which passed `BPT_BRK` (1 = `BPT_WRITE`) as the breakpoint type and made IDA send `Z2` (rejected with `E09`) | restart with the launcher; upgrade to 0.6.1+; `rosetta_doctor()` shows both bases. A raw `Z0` at the address should produce `T05` |
 | `could not detect architecture from target info` | `dbg_gdb.cfg` has no `com.apple.debugserver.x86_64` map | `ida_kernwin.rosetta_install_cfg()` + restart IDA |
 | registers show as `?`, memory reads fail | same missing register map, or manual memory regions not configured | apply the config override; optionally set `Debugger → Manual memory regions` |

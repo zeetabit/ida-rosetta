@@ -43,7 +43,7 @@ Options:
 | `--start` | spawn it with the bundled launcher instead of attaching |
 | `--args`, `--cwd`, `--env` | used with `--start` (`env` = `KEY=VALUE …`) |
 | `--stdin PATH` | file/FIFO fed to the started program |
-| `--bp ADDR` | breakpoint to add after attaching (repeatable, hex) |
+| `--bp SPEC` | breakpoint to add after attaching (repeatable: `0x…`, `+0x…`, `rva:0x…`, IDA name, `App+0x…`) |
 | `--run` | continue after attaching |
 | `--wait SECONDS` | pump events for up to N seconds waiting for a stop |
 | `--regs a,b,c` | read these registers at the stop |
@@ -59,12 +59,22 @@ From any IDAPython context (headless or GUI):
 
 ```python
 ida_kernwin.rosetta_headless(path="/path/prog", pid=None, start=False,
-                             breakpoints=[0x100003c78], run=True,
-                             wait_timeout=20, registers=["rdi", "rsi"])
+                             breakpoints=["compare_code", "+0x3c78"], run=True,
+                             wait_timeout=20, registers=["rdi", "rsi"],
+                             on_bpt=on_bpt)
 ```
 
 Returns the same dict as the driver. `ida_kernwin.rosetta_detach()` closes the
 session.
+
+`on_bpt(ctx)` is called on a breakpoint hit. Return `"continue"` (or `True`) to
+resume automatically; anything else leaves the process stopped. `ctx` exposes
+`ea`, `tid`, `reg()`, `regs()`, `read()`, `read_str()`, `write()`,
+`continue_now()` and `stop()`. While `rosetta_headless(..., wait_timeout=…)`
+pumps events, auto-continues are handled and the loop keeps waiting for a real
+stop.
+
+Generic target template: [`examples/generic_helper.py`](../examples/generic_helper.py).
 
 ## Caveats
 

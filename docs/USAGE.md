@@ -277,6 +277,50 @@ Notes for automated clients:
   the debugger itself and returns `{ok, error, pid, rip, registers, …}`.
 * The GUI instance stays fully usable during and after the attach.
 
+### Generic target scripts (any Intel app)
+
+Only the *policy* is app-specific. The plugin exposes a target-independent
+surface for it:
+
+```python
+def on_bpt(ctx):
+    print("hit 0x%x rdi=0x%x" % (ctx.ea, ctx.reg("rdi")))
+    return "stop"                     # or "continue"
+
+ida_kernwin.rosetta_headless(
+    path="/path/to/app", start=False,
+    breakpoints=["main", "+0x3c78", "compare_code"],   # see below
+    on_bpt=on_bpt, run=True, wait_timeout=30,
+    registers=("rdi", "rsi", "rdx"),
+)
+```
+
+Breakpoint specifications: absolute (`0x100003c78`), image-relative
+(`+0x3c78` or `rva:0x3c78`), an IDA name (`main`, `compare_code`), or
+`AppName+0x3c78`.
+
+In a GUI instance the same policy can use the attach action instead of the
+one-shot `rosetta_headless()` wrapper:
+
+```python
+ea = ida_kernwin.rosetta_add_bpt("+0x3c78")
+ida_kernwin.rosetta_on_bpt(on_bpt, [ea])
+ida_kernwin.rosetta_attach()      # resumes after IDA registers the session
+```
+
+Both paths are equivalent; `rosetta_headless()` detects the GUI and uses the
+pre-attach + deferred-resume path automatically.
+
+`ctx` provides `ea`, `tid`, `reg(name)`, `regs(names=None)`, `read(ea, size)`,
+`read_str(ea, maxlen)`, `write(ea, data)`, `continue_now()`, `stop()`.
+The same helpers are on `ida_kernwin` (`rosetta_reg`, `rosetta_regs`,
+`rosetta_read`, `rosetta_read_str`, `rosetta_write`, `rosetta_on_bpt`,
+`rosetta_off_bpt`).
+
+`examples/generic_helper.py` is the copyable template.
+`examples/fallingwhale_helper.py` is the same API plus that binary's policy
+(MD5 at `rdi`, length at `rsi`, buffer at `rdx`).
+
 ## 10. A typical session
 
 1. Open the database; confirm `rosetta_doctor()` is green (§1).

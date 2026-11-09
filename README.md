@@ -201,6 +201,8 @@ $IDAUSR/cfg/dbg_gdb.cfg                       patched copy (config override)
 * [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) — version matrix and the
   post-upgrade checklist
 * [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → cause → fix
+* [examples/generic_helper.py](examples/generic_helper.py) — target-independent template (symbolic breakpoints + `on_bpt`)
+* [examples/fallingwhale_helper.py](examples/fallingwhale_helper.py) — FallingWhale policy using that template
 
 ## Troubleshooting
 
